@@ -3,9 +3,6 @@
   --gold: #C9A24B;
   --cream: #F4F1EA;
   --warm-gray: #6B6459;
-  --marble: #EDE7DD;
-  --wood: #8B5E34;
-  --toaster: #E4572E;
   --panel-bg: rgba(31, 42, 68, 0.92);
 }
 
@@ -22,7 +19,7 @@ html, body {
 
 .stage {
   position: relative;
-  width: 900px;
+  width: 960px;
   max-width: 100vw;
   margin: 0 auto;
   display: flex;
@@ -30,13 +27,19 @@ html, body {
   align-items: center;
 }
 
-canvas {
-  display: block;
+#sceneContainer {
   width: 100%;
-  height: auto;
-  background: var(--wood);
+  aspect-ratio: 960 / 560;
   border-radius: 0 0 14px 14px;
+  overflow: hidden;
   box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+  background: #cfe0e8;
+}
+
+#sceneContainer canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
 }
 
 /* ---------- HUD ---------- */
@@ -49,6 +52,8 @@ canvas {
   background: linear-gradient(180deg, rgba(31,42,68,0.85), rgba(31,42,68,0.55));
   backdrop-filter: blur(6px);
   border-radius: 14px 14px 0 0;
+  position: relative;
+  z-index: 5;
 }
 
 .hud-item {
@@ -100,6 +105,7 @@ canvas {
   background: rgba(14, 20, 32, 0.72);
   border-radius: 14px;
   transition: opacity 0.25s ease;
+  z-index: 10;
 }
 
 .overlay.hidden {
@@ -112,7 +118,7 @@ canvas {
   border: 1px solid rgba(201,162,75,0.35);
   border-radius: 16px;
   padding: 36px 40px;
-  max-width: 420px;
+  max-width: 440px;
   text-align: center;
   box-shadow: 0 24px 60px rgba(0,0,0,0.5);
 }
@@ -220,6 +226,7 @@ kbd.wide { padding: 4px 14px; }
   box-shadow: 0 10px 24px rgba(0,0,0,0.35);
   transition: opacity 0.3s ease, transform 0.3s ease;
   opacity: 1;
+  z-index: 6;
 }
 
 .lap-toast.hidden {

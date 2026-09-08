@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Micro-Mayhem Doméstico — Prototipo Jugable</title>
+<title>Micro-Mayhem Doméstico — Prototipo 3D</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
@@ -31,14 +31,14 @@
       </div>
     </div>
 
-    <canvas id="gameCanvas" width="900" height="560"></canvas>
+    <div id="sceneContainer"></div>
 
     <!-- Pantalla de inicio -->
     <div class="overlay" id="startOverlay">
       <div class="panel">
-        <p class="eyebrow">Pista 1 — El Gran Escape de la Cocina</p>
+        <p class="eyebrow">Recorrido — La Casa Completa</p>
         <h1>Micro-Mayhem<span>Doméstico</span></h1>
-        <p class="desc">Da vueltas a la mesada antes de que la tostadora se caliente. Derrapa cerca de los bordes para cargar el boost.</p>
+        <p class="desc">Dale la vuelta a la casa: cocina, living, baño y pasillo, con cámara baja en tercera persona como un kart de verdad. Derrapa cerca de los muebles para cargar el boost.</p>
         <div class="controls">
           <div class="key-row"><kbd>&larr;</kbd><kbd>&uarr;</kbd><kbd>&darr;</kbd><kbd>&rarr;</kbd><span>Conducir</span></div>
           <div class="key-row"><kbd class="wide">ESPACIO</kbd><span>Boost</span></div>
@@ -62,6 +62,7 @@
 
   </div>
 
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script src="game.js"></script>
 </body>
 </html>

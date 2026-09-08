@@ -1,190 +1,207 @@
 // ============================================================
-// MICRO-MAYHEM DOMÉSTICO — Prototipo jugable (Pista 1: Cocina)
+// MICRO-MAYHEM DOMÉSTICO — Prototipo 3D (Three.js)
+// Cámara en tercera persona, baja al piso, estilo kart de carreras.
+// La pista recorre la casa completa: cocina, living, baño y pasillo.
 // ============================================================
 
-const canvas = document.getElementById('gameCanvas');
-const ctx = canvas.getContext('2d');
-const W = canvas.width, H = canvas.height;
+// ---------- Dimensiones de la pista (unidades de mundo) ----------
+const TRACK_OUTER = { rx: 26, rz: 15.5 };
+const TRACK_INNER = { rx: 14.5, rz: 7 };
+const RING_SEGMENTS = 96;
 
-const CENTER = { x: W / 2, y: H / 2 };
-const TRACK_OUTER = { rx: 400, ry: 230 };
-const TRACK_INNER = { rx: 230, ry: 110 };
+// Colores por zona de la casa (0..3), en el orden en que se recorren
+const ZONE_COLORS = [
+  0xEDE7DD, // 0: Cocina — mesada de mármol claro
+  0xD8E7EC, // 1: Baño — piso de cerámica celeste claro
+  0xB98A55, // 2: Pasillo — piso de madera cálida
+  0xC96B4A, // 3: Living — alfombra terracota
+];
 
-// ---------- Estado del juego ----------
-const state = {
-  running: false,
-  finished: false,
-  time: 0,
-  lap: 0,
-  totalLaps: 3,
-  checkpoint: 0, // próximo checkpoint esperado (0..3)
-  lastAngleQuadrant: 0,
+// ============================================================
+// ESCENA, CÁMARA, RENDERER
+// ============================================================
+const container = document.getElementById('sceneContainer');
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xcfe0e8);
+scene.fog = new THREE.Fog(0xE9DFC8, 30, 78);
+
+const camera = new THREE.PerspectiveCamera(62, 960 / 560, 0.1, 200);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+container.appendChild(renderer.domElement);
+
+function resizeRenderer() {
+  const w = container.clientWidth || 960;
+  const h = container.clientHeight || 560;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', resizeRenderer);
+
+// ---------- Luces: hora dorada entrando por la ventana ----------
+const hemi = new THREE.HemisphereLight(0xfff3d6, 0x6b6459, 0.55);
+scene.add(hemi);
+
+const sun = new THREE.DirectionalLight(0xffd9a0, 1.15);
+sun.position.set(-30, 26, 18);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+sun.shadow.camera.left = -40;
+sun.shadow.camera.right = 40;
+sun.shadow.camera.top = 40;
+sun.shadow.camera.bottom = -40;
+sun.shadow.camera.far = 100;
+scene.add(sun);
+
+const fill = new THREE.PointLight(0xffe3b8, 0.4, 60);
+fill.position.set(20, 10, -10);
+scene.add(fill);
+
+// ============================================================
+// GEOMETRÍA DE LA PISTA — anillo elíptico con 4 zonas de la casa
+// ============================================================
+function buildTrackRing() {
+  const positions = [];
+  const colors = [];
+  const indices = [];
+  const palette = ZONE_COLORS.map(c => new THREE.Color(c));
+
+  for (let i = 0; i <= RING_SEGMENTS; i++) {
+    const t = (i / RING_SEGMENTS) * Math.PI * 2;
+    const q = Math.floor(((t + Math.PI * 2) % (Math.PI * 2)) / (Math.PI / 2)) % 4;
+    const col = palette[q];
+
+    const ox = Math.cos(t) * TRACK_OUTER.rx;
+    const oz = Math.sin(t) * TRACK_OUTER.rz;
+    const ix = Math.cos(t) * TRACK_INNER.rx;
+    const iz = Math.sin(t) * TRACK_INNER.rz;
+
+    positions.push(ox, 0, oz, ix, 0, iz);
+    colors.push(col.r, col.g, col.b, col.r, col.g, col.b);
+  }
+
+  for (let i = 0; i < RING_SEGMENTS; i++) {
+    const a = i * 2, b = i * 2 + 1, c = i * 2 + 2, d = i * 2 + 3;
+    indices.push(a, b, c, b, d, c);
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+
+  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.05 });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.receiveShadow = true;
+  return mesh;
+}
+scene.add(buildTrackRing());
+
+// ---------- Piso exterior (madera de la casa, fuera de la pista) ----------
+const outerFloor = new THREE.Mesh(
+  new THREE.CircleGeometry(90, 48),
+  new THREE.MeshStandardMaterial({ color: 0x8B5E34, roughness: 0.85 })
+);
+outerFloor.rotation.x = -Math.PI / 2;
+outerFloor.position.y = -0.02;
+outerFloor.receiveShadow = true;
+scene.add(outerFloor);
+
+// ---------- Isla central (muebles/isla de cocina, obstáculo sólido) ----------
+const island = new THREE.Mesh(
+  new THREE.CylinderGeometry(1, 1, 1.1, 32, 1, false),
+  new THREE.MeshStandardMaterial({ color: 0x6b4a2c, roughness: 0.7 })
+);
+island.scale.set(TRACK_INNER.rx * 0.92, 1, TRACK_INNER.rz * 0.92);
+island.position.y = 0.55;
+island.castShadow = true;
+island.receiveShadow = true;
+scene.add(island);
+
+// ---------- Paredes perimetrales de la casa ----------
+function makeWallSegment(cx, cz, rotY, width) {
+  const wall = new THREE.Mesh(
+    new THREE.BoxGeometry(width, 8, 0.6),
+    new THREE.MeshStandardMaterial({ color: 0xF4F1EA, roughness: 0.9 })
+  );
+  wall.position.set(cx, 4, cz);
+  wall.rotation.y = rotY;
+  wall.receiveShadow = true;
+  wall.castShadow = true;
+  scene.add(wall);
+}
+const wallDist = TRACK_OUTER.rx + 6;
+makeWallSegment(0, -TRACK_OUTER.rz - 6, 0, TRACK_OUTER.rx * 2.3);
+makeWallSegment(0, TRACK_OUTER.rz + 6, 0, TRACK_OUTER.rx * 2.3);
+makeWallSegment(-wallDist, 0, Math.PI / 2, TRACK_OUTER.rz * 2.3);
+makeWallSegment(wallDist, 0, Math.PI / 2, TRACK_OUTER.rz * 2.3);
+
+// Ventana con luz cálida (hint de "hora dorada")
+const windowGlow = new THREE.Mesh(
+  new THREE.PlaneGeometry(8, 4.5),
+  new THREE.MeshBasicMaterial({ color: 0xfff3c4, transparent: true, opacity: 0.9 })
+);
+windowGlow.position.set(-wallDist + 0.31, 5, -6);
+windowGlow.rotation.y = Math.PI / 2;
+scene.add(windowGlow);
+
+// ============================================================
+// TOSTADORA — evento dinámico (calor / distorsión)
+// ============================================================
+const toaster = {
+  active: false,
+  timer: 0,
+  x: 8, z: 4, radius: 6,
 };
+const toasterGroup = new THREE.Group();
+const toasterBody = new THREE.Mesh(
+  new THREE.BoxGeometry(1.6, 1.1, 1.1),
+  new THREE.MeshStandardMaterial({ color: 0xC7C7C7, metalness: 0.6, roughness: 0.35 })
+);
+toasterBody.castShadow = true;
+toasterGroup.add(toasterBody);
+const toasterGlowMat = new THREE.MeshBasicMaterial({ color: 0xE4572E, transparent: true, opacity: 0 });
+const toasterGlow = new THREE.Mesh(new THREE.SphereGeometry(2.4, 16, 16), toasterGlowMat);
+toasterGroup.add(toasterGlow);
+const toasterLight = new THREE.PointLight(0xE4572E, 0, 10);
+toasterGroup.add(toasterLight);
+toasterGroup.position.set(toaster.x, island.position.y + 1.1, toaster.z);
+scene.add(toasterGroup);
 
-const keys = {};
-window.addEventListener('keydown', (e) => { keys[e.code] = true; });
-window.addEventListener('keyup', (e) => { keys[e.code] = false; });
-
-// ---------- Auto ----------
-const car = {
-  x: CENTER.x,
-  y: CENTER.y - (TRACK_OUTER.ry + TRACK_INNER.ry) / 2,
-  angle: 0, // radianes, 0 = derecha
-  speed: 0,
-  maxSpeed: 5.4,
-  boostMaxSpeed: 8.6,
-  accel: 0.16,
-  turnRate: 0.045,
-  friction: 0.985,
-  offTrackPenalty: 0.9,
-  boost: 100,
-  boostMax: 100,
-  isBoosting: false,
-  isOffTrack: false,
-};
-
-let particles = [];
-let toaster = { timer: 0, active: false, x: CENTER.x + 250, y: CENTER.y + 40, radius: 46 };
-
-// ---------- Utilidades de pista ----------
-function ellipseContains(px, py, cx, cy, rx, ry) {
-  const dx = (px - cx) / rx;
-  const dy = (py - cy) / ry;
-  return dx * dx + dy * dy <= 1;
+// ---------- Partículas: migas de la tostadora + chispas de boost ----------
+const particleGeo = new THREE.SphereGeometry(0.06, 6, 6);
+const sparkPool = [];
+function spawnParticle(x, y, z, vx, vy, vz, color, life) {
+  const mat = new THREE.MeshBasicMaterial({ color });
+  const mesh = new THREE.Mesh(particleGeo, mat);
+  mesh.position.set(x, y, z);
+  scene.add(mesh);
+  sparkPool.push({ mesh, vx, vy, vz, life, maxLife: life });
 }
-
-function onTrack(px, py) {
-  const inOuter = ellipseContains(px, py, CENTER.x, CENTER.y, TRACK_OUTER.rx, TRACK_OUTER.ry);
-  const inInner = ellipseContains(px, py, CENTER.x, CENTER.y, TRACK_INNER.rx, TRACK_INNER.ry);
-  return inOuter && !inInner;
-}
-
-function distToInnerEdge(px, py) {
-  const dx = (px - CENTER.x) / TRACK_INNER.rx;
-  const dy = (py - CENTER.y) / TRACK_INNER.ry;
-  const d = Math.sqrt(dx * dx + dy * dy);
-  return Math.abs(d - 1); // 0 = justo en el borde interior (near-miss)
-}
-
-function angleQuadrant(px, py) {
-  const a = Math.atan2(py - CENTER.y, px - CENTER.x);
-  const norm = (a + Math.PI * 2) % (Math.PI * 2);
-  return Math.floor(norm / (Math.PI / 2)); // 0..3
-}
-
-// ---------- Física del auto ----------
-function updateCar(dt) {
-  const forward = keys['ArrowUp'] || keys['KeyW'];
-  const backward = keys['ArrowDown'] || keys['KeyS'];
-  const left = keys['ArrowLeft'] || keys['KeyA'];
-  const right = keys['ArrowRight'] || keys['KeyD'];
-  const boostKey = keys['Space'];
-
-  car.isOffTrack = !onTrack(car.x, car.y);
-  const speedCap = car.isOffTrack ? car.maxSpeed * car.offTrackPenalty : car.maxSpeed;
-  const cap = car.isBoosting ? car.boostMaxSpeed : speedCap;
-
-  if (forward) car.speed += car.accel;
-  else if (backward) car.speed -= car.accel * 0.7;
-  else car.speed *= car.friction;
-
-  car.speed = Math.max(-cap * 0.5, Math.min(cap, car.speed));
-
-  const turnFactor = Math.min(1, Math.abs(car.speed) / 2.5);
-  let turning = false;
-  if (left) { car.angle -= car.turnRate * turnFactor; turning = true; }
-  if (right) { car.angle += car.turnRate * turnFactor; turning = true; }
-
-  // Boost
-  car.isBoosting = boostKey && car.boost > 0 && car.speed > 1;
-  if (car.isBoosting) {
-    car.speed += car.accel * 1.4;
-    car.boost = Math.max(0, car.boost - dt * 42);
-    if (Math.random() < 0.7) spawnSpark();
-  } else {
-    // Recarga por derrape (girar a buena velocidad)
-    if (turning && Math.abs(car.speed) > 3) {
-      car.boost = Math.min(car.boostMax, car.boost + dt * 14);
-    }
-  }
-
-  // Recarga extra por near-miss al borde interior
-  const edgeDist = distToInnerEdge(car.x, car.y);
-  if (edgeDist < 0.06 && Math.abs(car.speed) > 2) {
-    car.boost = Math.min(car.boostMax, car.boost + dt * 30);
-  }
-
-  // Distorsión por calor de la tostadora: si está activa y el auto está cerca, penaliza control
-  let heatFactor = 1;
-  if (toaster.active) {
-    const dx = car.x - toaster.x, dy = car.y - toaster.y;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    if (dist < toaster.radius * 2.2) {
-      heatFactor = 0.55; // el auto "tiembla" y pierde tracción
-    }
-  }
-
-  car.x += Math.cos(car.angle) * car.speed * heatFactor;
-  car.y += Math.sin(car.angle) * car.speed * heatFactor;
-
-  updateLapProgress();
-}
-
-function updateLapProgress() {
-  const q = angleQuadrant(car.x, car.y);
-  if (q !== state.lastAngleQuadrant) {
-    const expected = (state.checkpoint) % 4;
-    if (q === expected) {
-      state.checkpoint++;
-      if (state.checkpoint % 4 === 0) {
-        state.lap++;
-        showLapToast();
-        if (state.lap >= state.totalLaps) finishRace();
-      }
-    }
-    state.lastAngleQuadrant = q;
-  }
-}
-
-// ---------- Partículas ----------
-function spawnSpark() {
-  const backX = car.x - Math.cos(car.angle) * 14;
-  const backY = car.y - Math.sin(car.angle) * 14;
-  particles.push({
-    x: backX + (Math.random() - 0.5) * 6,
-    y: backY + (Math.random() - 0.5) * 6,
-    vx: -Math.cos(car.angle) * (1 + Math.random() * 2) + (Math.random() - 0.5),
-    vy: -Math.sin(car.angle) * (1 + Math.random() * 2) + (Math.random() - 0.5),
-    life: 1,
-    color: Math.random() < 0.5 ? '#F3D98B' : '#E4572E',
-    size: 2 + Math.random() * 2,
-  });
-}
-
-function spawnCrumb() {
-  particles.push({
-    x: toaster.x + (Math.random() - 0.5) * 20,
-    y: toaster.y - 20,
-    vx: (Math.random() - 0.5) * 1.5,
-    vy: -1 - Math.random(),
-    life: 1,
-    color: '#C9A24B',
-    size: 1.5 + Math.random() * 1.5,
-    gravity: true,
-  });
-}
-
 function updateParticles(dt) {
-  particles.forEach(p => {
-    p.x += p.vx;
-    p.y += p.vy;
-    if (p.gravity) p.vy += 0.05;
-    p.life -= dt * 1.6;
-  });
-  particles = particles.filter(p => p.life > 0);
+  for (let i = sparkPool.length - 1; i >= 0; i--) {
+    const p = sparkPool[i];
+    p.mesh.position.x += p.vx * dt;
+    p.mesh.position.y += p.vy * dt;
+    p.mesh.position.z += p.vz * dt;
+    p.vy -= 2.2 * dt;
+    p.life -= dt;
+    p.mesh.material.opacity = Math.max(0, p.life / p.maxLife);
+    p.mesh.material.transparent = true;
+    if (p.life <= 0) {
+      scene.remove(p.mesh);
+      p.mesh.material.dispose();
+      sparkPool.splice(i, 1);
+    }
+  }
 }
 
-// ---------- Evento dinámico: tostadora ----------
 function updateToaster(dt) {
   toaster.timer += dt;
   if (!toaster.active && toaster.timer > 6) {
@@ -194,163 +211,226 @@ function updateToaster(dt) {
     toaster.active = false;
     toaster.timer = 0;
   }
-  if (toaster.active && Math.random() < 0.5) spawnCrumb();
-}
+  const targetOpacity = toaster.active ? 0.55 : 0;
+  toasterGlowMat.opacity += (targetOpacity - toasterGlowMat.opacity) * 0.1;
+  toasterLight.intensity += ((toaster.active ? 2.2 : 0) - toasterLight.intensity) * 0.1;
 
-// ---------- Dibujo ----------
-function drawTrack() {
-  // Piso de madera ya está de fondo (CSS). Dibujamos mesada de mármol.
-  ctx.save();
-  ctx.beginPath();
-  ctx.ellipse(CENTER.x, CENTER.y, TRACK_OUTER.rx, TRACK_OUTER.ry, 0, 0, Math.PI * 2);
-  const marbleGrad = ctx.createRadialGradient(CENTER.x, CENTER.y, 50, CENTER.x, CENTER.y, TRACK_OUTER.rx);
-  marbleGrad.addColorStop(0, '#f4f1ea');
-  marbleGrad.addColorStop(1, '#e4ddce');
-  ctx.fillStyle = marbleGrad;
-  ctx.fill();
-
-  // Vetas de mármol sutiles
-  ctx.strokeStyle = 'rgba(150,140,120,0.18)';
-  ctx.lineWidth = 1;
-  for (let i = 0; i < 10; i++) {
-    ctx.beginPath();
-    ctx.moveTo(CENTER.x - TRACK_OUTER.rx + i * 80, CENTER.y - TRACK_OUTER.ry);
-    ctx.quadraticCurveTo(CENTER.x - TRACK_OUTER.rx + i * 80 + 40, CENTER.y, CENTER.x - TRACK_OUTER.rx + i * 80 - 20, CENTER.y + TRACK_OUTER.ry);
-    ctx.stroke();
+  if (toaster.active && Math.random() < 0.5) {
+    spawnParticle(
+      toaster.x + (Math.random() - 0.5) * 0.8,
+      toasterGroup.position.y + 0.6,
+      toaster.z + (Math.random() - 0.5) * 0.8,
+      (Math.random() - 0.5) * 1.5, 2 + Math.random(), (Math.random() - 0.5) * 1.5,
+      0xC9A24B, 0.9
+    );
   }
-  ctx.restore();
-
-  // Isla central (obstáculos de cocina)
-  ctx.save();
-  ctx.beginPath();
-  ctx.ellipse(CENTER.x, CENTER.y, TRACK_INNER.rx, TRACK_INNER.ry, 0, 0, Math.PI * 2);
-  ctx.fillStyle = '#8B5E34';
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(0,0,0,0.15)';
-  ctx.lineWidth = 3;
-  ctx.stroke();
-  ctx.restore();
-
-  // Línea de meta
-  ctx.save();
-  ctx.strokeStyle = '#1F2A44';
-  ctx.lineWidth = 6;
-  ctx.setLineDash([8, 6]);
-  ctx.beginPath();
-  ctx.moveTo(CENTER.x, CENTER.y - TRACK_OUTER.ry);
-  ctx.lineTo(CENTER.x, CENTER.y - TRACK_INNER.ry);
-  ctx.stroke();
-  ctx.restore();
-
-  // Borde exterior de la pista
-  ctx.save();
-  ctx.beginPath();
-  ctx.ellipse(CENTER.x, CENTER.y, TRACK_OUTER.rx, TRACK_OUTER.ry, 0, 0, Math.PI * 2);
-  ctx.strokeStyle = 'rgba(31,42,68,0.5)';
-  ctx.lineWidth = 4;
-  ctx.stroke();
-  ctx.restore();
 }
 
-function drawToaster() {
-  ctx.save();
-  const glow = toaster.active ? 1 : 0.35;
-  const grad = ctx.createRadialGradient(toaster.x, toaster.y, 4, toaster.x, toaster.y, toaster.radius);
-  grad.addColorStop(0, `rgba(228,87,46,${glow})`);
-  grad.addColorStop(1, 'rgba(228,87,46,0)');
-  ctx.fillStyle = grad;
-  ctx.beginPath();
-  ctx.arc(toaster.x, toaster.y, toaster.radius, 0, Math.PI * 2);
-  ctx.fill();
+// ============================================================
+// KART DEL JUGADOR
+// ============================================================
+const kart = new THREE.Group();
 
-  // Cuerpo de la tostadora
-  ctx.fillStyle = '#C7C7C7';
-  ctx.fillRect(toaster.x - 22, toaster.y - 16, 44, 32);
-  ctx.fillStyle = toaster.active ? '#E4572E' : '#8a8a8a';
-  ctx.fillRect(toaster.x - 14, toaster.y - 10, 10, 20);
-  ctx.fillRect(toaster.x + 4, toaster.y - 10, 10, 20);
-  ctx.restore();
+const body = new THREE.Mesh(
+  new THREE.BoxGeometry(1.1, 0.42, 2.0),
+  new THREE.MeshStandardMaterial({ color: 0x1F2A44, roughness: 0.4, metalness: 0.15 })
+);
+body.position.y = 0.42;
+body.castShadow = true;
+kart.add(body);
+
+const cabin = new THREE.Mesh(
+  new THREE.BoxGeometry(0.7, 0.3, 0.8),
+  new THREE.MeshStandardMaterial({ color: 0xC9A24B, roughness: 0.3, metalness: 0.2 })
+);
+cabin.position.set(0, 0.72, -0.1);
+cabin.castShadow = true;
+kart.add(cabin);
+
+const wheelGeo = new THREE.CylinderGeometry(0.28, 0.28, 0.24, 16);
+const wheelMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.9 });
+const wheelPositions = [
+  [-0.62, 0.28, 0.7], [0.62, 0.28, 0.7],
+  [-0.62, 0.28, -0.7], [0.62, 0.28, -0.7],
+];
+const wheels = wheelPositions.map(([x, y, z]) => {
+  const w = new THREE.Mesh(wheelGeo, wheelMat);
+  w.rotation.z = Math.PI / 2;
+  w.position.set(x, y, z);
+  w.castShadow = true;
+  kart.add(w);
+  return w;
+});
+
+scene.add(kart);
+
+// ============================================================
+// FÍSICA ARCADE (estilo Mario Kart)
+// ============================================================
+const car = {
+  x: 0, z: -(TRACK_OUTER.rz + TRACK_INNER.rz) / 2,
+  heading: Math.PI / 2,
+  speed: 0,
+  maxSpeed: 15.5,
+  boostMaxSpeed: 23,
+  accel: 0.42,
+  turnRate: 2.1,
+  friction: 0.985,
+  boost: 100,
+  boostMax: 100,
+  isBoosting: false,
+};
+
+function forwardVec(heading) {
+  return { x: Math.sin(heading), z: Math.cos(heading) };
 }
 
-function drawParticles() {
-  particles.forEach(p => {
-    ctx.save();
-    ctx.globalAlpha = Math.max(0, p.life);
-    ctx.fillStyle = p.color;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  });
+const keys = {};
+window.addEventListener('keydown', (e) => { keys[e.code] = true; });
+window.addEventListener('keyup', (e) => { keys[e.code] = false; });
+
+function ellipseValue(x, z, rx, rz) {
+  return (x / rx) * (x / rx) + (z / rz) * (z / rz);
 }
 
-function drawCar() {
-  ctx.save();
-  ctx.translate(car.x, car.y);
-  ctx.rotate(car.angle);
+function updateCar(dt) {
+  const forward = keys['ArrowUp'] || keys['KeyW'];
+  const backward = keys['ArrowDown'] || keys['KeyS'];
+  const left = keys['ArrowLeft'] || keys['KeyA'];
+  const right = keys['ArrowRight'] || keys['KeyD'];
+  const boostKey = keys['Space'];
 
-  // Sombra
-  ctx.fillStyle = 'rgba(0,0,0,0.25)';
-  ctx.beginPath();
-  ctx.ellipse(1, 3, 13, 8, 0, 0, Math.PI * 2);
-  ctx.fill();
+  if (forward) car.speed += car.accel;
+  else if (backward) car.speed -= car.accel * 0.7;
+  else car.speed *= car.friction;
 
-  // Carrocería
-  ctx.fillStyle = car.isOffTrack ? '#a9a29a' : '#1F2A44';
-  ctx.beginPath();
-  ctx.moveTo(14, 0);
-  ctx.lineTo(-10, -8);
-  ctx.lineTo(-6, 0);
-  ctx.lineTo(-10, 8);
-  ctx.closePath();
-  ctx.fill();
+  car.isBoosting = !!(boostKey && car.boost > 0 && car.speed > 2);
+  const cap = car.isBoosting ? car.boostMaxSpeed : car.maxSpeed;
+  car.speed = Math.max(-cap * 0.4, Math.min(cap, car.speed));
 
-  ctx.fillStyle = '#C9A24B';
-  ctx.beginPath();
-  ctx.arc(4, 0, 3.5, 0, Math.PI * 2);
-  ctx.fill();
+  const turnFactor = Math.min(1, Math.abs(car.speed) / 6);
+  let turning = false;
+  const dir = car.speed >= 0 ? 1 : -1;
+  if (left) { car.heading += car.turnRate * turnFactor * dt * dir; turning = true; }
+  if (right) { car.heading -= car.turnRate * turnFactor * dt * dir; turning = true; }
 
   if (car.isBoosting) {
-    ctx.fillStyle = 'rgba(228,87,46,0.85)';
-    ctx.beginPath();
-    ctx.moveTo(-10, -4);
-    ctx.lineTo(-20 - Math.random() * 8, 0);
-    ctx.lineTo(-10, 4);
-    ctx.closePath();
-    ctx.fill();
+    car.speed += car.accel * 1.6;
+    car.boost = Math.max(0, car.boost - dt * 40);
+    if (Math.random() < 0.6) {
+      const f = forwardVec(car.heading);
+      spawnParticle(
+        car.x - f.x * 1.1, 0.35, car.z - f.z * 1.1,
+        -f.x * 3 + (Math.random() - 0.5), 1.5 + Math.random(), -f.z * 3 + (Math.random() - 0.5),
+        Math.random() < 0.5 ? 0xF3D98B : 0xE4572E, 0.5
+      );
+    }
+  } else if (turning && Math.abs(car.speed) > 7) {
+    car.boost = Math.min(car.boostMax, car.boost + dt * 16);
   }
 
-  ctx.restore();
-}
-
-// ---------- Loop principal ----------
-let lastTime = performance.now();
-
-function loop(now) {
-  const dt = Math.min(0.033, (now - lastTime) / 1000);
-  lastTime = now;
-
-  ctx.clearRect(0, 0, W, H);
-  drawTrack();
-  drawToaster();
-
-  if (state.running && !state.finished) {
-    updateCar(dt);
-    updateToaster(dt);
-    updateParticles(dt);
-    state.time += dt;
-    updateHUD();
-  } else {
-    updateParticles(dt);
+  // Distorsión de calor cerca de la tostadora
+  let heatFactor = 1;
+  if (toaster.active) {
+    const dx = car.x - toaster.x, dz = car.z - toaster.z;
+    if (Math.sqrt(dx * dx + dz * dz) < toaster.radius) heatFactor = 0.55;
   }
 
-  drawParticles();
-  drawCar();
+  const f = forwardVec(car.heading);
+  let nx = car.x + f.x * car.speed * dt * heatFactor;
+  let nz = car.z + f.z * car.speed * dt * heatFactor;
 
-  requestAnimationFrame(loop);
+  // Colisión con isla central (empuja hacia afuera)
+  const innerVal = ellipseValue(nx, nz, TRACK_INNER.rx * 0.9, TRACK_INNER.rz * 0.9);
+  if (innerVal < 1) {
+    const ang = Math.atan2(nz, nx);
+    nx = Math.cos(ang) * TRACK_INNER.rx * 0.9 * 1.02;
+    nz = Math.sin(ang) * TRACK_INNER.rz * 0.9 * 1.02;
+    car.speed *= 0.55;
+  } else if (innerVal < 1.15 && Math.abs(car.speed) > 6) {
+    car.boost = Math.min(car.boostMax, car.boost + dt * 26);
+  }
+
+  // Colisión con pared exterior de la casa (empuja hacia adentro)
+  const outerVal = ellipseValue(nx, nz, TRACK_OUTER.rx * 0.97, TRACK_OUTER.rz * 0.97);
+  if (outerVal > 1) {
+    const ang = Math.atan2(nz, nx);
+    nx = Math.cos(ang) * TRACK_OUTER.rx * 0.97;
+    nz = Math.sin(ang) * TRACK_OUTER.rz * 0.97;
+    car.speed *= 0.55;
+  }
+
+  car.x = nx;
+  car.z = nz;
+
+  kart.position.set(car.x, 0, car.z);
+  kart.rotation.y = car.heading;
+  const wheelSpin = car.speed * dt * 2.4;
+  wheels.forEach(w => (w.rotation.x += wheelSpin));
+  const steerLean = ((left ? 1 : 0) - (right ? 1 : 0)) * 0.08;
+  kart.rotation.z = THREE.MathUtils.lerp(kart.rotation.z, -steerLean, 0.15);
+
+  updateLapProgress();
 }
 
-// ---------- HUD ----------
+// ============================================================
+// VUELTAS
+// ============================================================
+const state = {
+  running: false,
+  finished: false,
+  time: 0,
+  lap: 0,
+  totalLaps: 3,
+  checkpoint: 0,
+  lastQuadrant: 0,
+};
+
+function angleQuadrant(x, z) {
+  const a = Math.atan2(z, x);
+  const norm = (a + Math.PI * 2) % (Math.PI * 2);
+  return Math.floor(norm / (Math.PI / 2)) % 4;
+}
+
+function updateLapProgress() {
+  const q = angleQuadrant(car.x, car.z);
+  if (q !== state.lastQuadrant) {
+    const expected = state.checkpoint % 4;
+    if (q === expected) {
+      state.checkpoint++;
+      if (state.checkpoint % 4 === 0) {
+        state.lap++;
+        showLapToast();
+        if (state.lap >= state.totalLaps) finishRace();
+      }
+    }
+    state.lastQuadrant = q;
+  }
+}
+
+// ============================================================
+// CÁMARA — tercera persona, baja al piso, tipo kart
+// ============================================================
+const camTarget = new THREE.Vector3();
+const desiredCamPos = new THREE.Vector3();
+
+function updateCamera() {
+  const f = forwardVec(car.heading);
+  const camDist = 5.4;
+  const camHeight = 1.7;
+  desiredCamPos.set(
+    car.x - f.x * camDist,
+    camHeight,
+    car.z - f.z * camDist
+  );
+  camera.position.lerp(desiredCamPos, 0.14);
+  camTarget.set(car.x + f.x * 3, 0.65, car.z + f.z * 3);
+  camera.lookAt(camTarget);
+}
+
+// ============================================================
+// HUD
+// ============================================================
 const lapValue = document.getElementById('lapValue');
 const timeValue = document.getElementById('timeValue');
 const boostFill = document.getElementById('boostFill');
@@ -372,25 +452,28 @@ function showLapToast() {
   lapToastTimer = setTimeout(() => lapToast.classList.add('hidden'), 1600);
 }
 
-// ---------- Flujo de partida ----------
+// ============================================================
+// FLUJO DE PARTIDA
+// ============================================================
 const startOverlay = document.getElementById('startOverlay');
 const finishOverlay = document.getElementById('finishOverlay');
 const finalTime = document.getElementById('finalTime');
 
 function resetGame() {
-  car.x = CENTER.x;
-  car.y = CENTER.y - (TRACK_OUTER.ry + TRACK_INNER.ry) / 2;
-  car.angle = 0;
+  car.x = 0;
+  car.z = -(TRACK_OUTER.rz + TRACK_INNER.rz) / 2;
+  car.heading = Math.PI / 2;
   car.speed = 0;
   car.boost = car.boostMax;
   state.time = 0;
   state.lap = 0;
   state.checkpoint = 0;
-  state.lastAngleQuadrant = angleQuadrant(car.x, car.y);
+  state.lastQuadrant = angleQuadrant(car.x, car.z);
   state.finished = false;
-  particles = [];
   toaster.active = false;
   toaster.timer = 0;
+  kart.position.set(car.x, 0, car.z);
+  kart.rotation.y = car.heading;
 }
 
 function startRace() {
@@ -412,5 +495,29 @@ function finishRace() {
 document.getElementById('startBtn').addEventListener('click', startRace);
 document.getElementById('restartBtn').addEventListener('click', startRace);
 
+// ============================================================
+// LOOP PRINCIPAL
+// ============================================================
+let lastTime = performance.now();
+
+function loop(now) {
+  const dt = Math.min(0.033, (now - lastTime) / 1000);
+  lastTime = now;
+
+  if (state.running && !state.finished) {
+    updateCar(dt);
+    updateToaster(dt);
+    state.time += dt;
+    updateHUD();
+  }
+  updateParticles(dt);
+  updateCamera();
+
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+
+resizeRenderer();
 resetGame();
+updateCamera();
 requestAnimationFrame(loop);

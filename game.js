@@ -26,7 +26,7 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xcfe0e8);
 scene.fog = new THREE.Fog(0xE9DFC8, 30, 78);
 
-const camera = new THREE.PerspectiveCamera(62, 960 / 560, 0.1, 200);
+const camera = new THREE.PerspectiveCamera(72, 960 / 560, 0.1, 200);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -103,15 +103,70 @@ function buildTrackRing() {
 }
 scene.add(buildTrackRing());
 
-// ---------- Piso exterior (madera de la casa, fuera de la pista) ----------
+// ---------- Piso exterior (madera de la casa, con vetas procedurales) ----------
+function buildWoodTexture() {
+  const c = document.createElement('canvas');
+  c.width = 512; c.height = 512;
+  const g = c.getContext('2d');
+  g.fillStyle = '#8B5E34';
+  g.fillRect(0, 0, 512, 512);
+  for (let i = 0; i < 26; i++) {
+    const y = (i / 26) * 512 + (Math.random() - 0.5) * 6;
+    g.strokeStyle = `rgba(60,38,18,${0.15 + Math.random() * 0.12})`;
+    g.lineWidth = 1 + Math.random() * 1.5;
+    g.beginPath();
+    g.moveTo(0, y);
+    for (let x = 0; x <= 512; x += 32) {
+      g.lineTo(x, y + Math.sin(x * 0.05 + i) * 3);
+    }
+    g.stroke();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(10, 10);
+  return tex;
+}
 const outerFloor = new THREE.Mesh(
   new THREE.CircleGeometry(90, 48),
-  new THREE.MeshStandardMaterial({ color: 0x8B5E34, roughness: 0.85 })
+  new THREE.MeshStandardMaterial({ map: buildWoodTexture(), roughness: 0.88 })
 );
 outerFloor.rotation.x = -Math.PI / 2;
 outerFloor.position.y = -0.02;
 outerFloor.receiveShadow = true;
 scene.add(outerFloor);
+
+// ---------- Props decorativos: bloques tipo Lego y rampa de cartón ----------
+function addLegoScatter() {
+  const legoColors = [0xC0392B, 0xF1C40F, 0x2980B9, 0x27AE60, 0xE67E22];
+  const group = new THREE.Group();
+  for (let i = 0; i < 26; i++) {
+    const ang = Math.random() * Math.PI * 2;
+    const r = TRACK_OUTER.rx + 6 + Math.random() * 14;
+    const x = Math.cos(ang) * r * (TRACK_OUTER.rx / TRACK_OUTER.rx);
+    const z = Math.sin(ang) * (r * (TRACK_OUTER.rz / TRACK_OUTER.rx));
+    const size = 0.35 + Math.random() * 0.3;
+    const block = new THREE.Mesh(
+      new THREE.BoxGeometry(size, size, size),
+      new THREE.MeshStandardMaterial({ color: legoColors[i % legoColors.length], roughness: 0.4 })
+    );
+    block.position.set(x, size / 2, z);
+    block.rotation.y = Math.random() * Math.PI;
+    block.castShadow = true;
+    block.receiveShadow = true;
+    group.add(block);
+  }
+  // Rampa de cartón decorativa
+  const ramp = new THREE.Mesh(
+    new THREE.BoxGeometry(3, 0.3, 1.6),
+    new THREE.MeshStandardMaterial({ color: 0xC9A24B, roughness: 0.9 })
+  );
+  ramp.position.set(-(TRACK_OUTER.rx + 10), 0.5, -8);
+  ramp.rotation.z = 0.35;
+  ramp.castShadow = true;
+  group.add(ramp);
+  scene.add(group);
+}
+addLegoScatter();
 
 // ---------- Isla central (muebles/isla de cocina, obstáculo sólido) ----------
 const island = new THREE.Mesh(
@@ -174,6 +229,33 @@ toasterGroup.add(toasterLight);
 toasterGroup.position.set(toaster.x, island.position.y + 1.1, toaster.z);
 scene.add(toasterGroup);
 
+// Rebanada de pan que sale disparada cuando se activa la tostadora
+const toastSlices = [];
+function spawnToast() {
+  const slice = new THREE.Mesh(
+    new THREE.BoxGeometry(0.4, 0.5, 0.12),
+    new THREE.MeshStandardMaterial({ color: 0xD9A24B, roughness: 0.7 })
+  );
+  slice.position.set(toasterGroup.position.x, toasterGroup.position.y + 0.4, toasterGroup.position.z);
+  slice.castShadow = true;
+  scene.add(slice);
+  toastSlices.push({ mesh: slice, vy: 6.5, vx: (Math.random() - 0.5) * 0.6, life: 1.4 });
+}
+function updateToastSlices(dt) {
+  for (let i = toastSlices.length - 1; i >= 0; i--) {
+    const t = toastSlices[i];
+    t.mesh.position.y += t.vy * dt;
+    t.mesh.position.x += t.vx * dt;
+    t.vy -= 9 * dt;
+    t.mesh.rotation.x += dt * 4;
+    t.life -= dt;
+    if (t.life <= 0) {
+      scene.remove(t.mesh);
+      toastSlices.splice(i, 1);
+    }
+  }
+}
+
 // ---------- Partículas: migas de la tostadora + chispas de boost ----------
 const particleGeo = new THREE.SphereGeometry(0.06, 6, 6);
 const sparkPool = [];
@@ -207,10 +289,12 @@ function updateToaster(dt) {
   if (!toaster.active && toaster.timer > 6) {
     toaster.active = true;
     toaster.timer = 0;
+    spawnToast();
   } else if (toaster.active && toaster.timer > 3) {
     toaster.active = false;
     toaster.timer = 0;
   }
+  updateToastSlices(dt);
   const targetOpacity = toaster.active ? 0.55 : 0;
   toasterGlowMat.opacity += (targetOpacity - toasterGlowMat.opacity) * 0.1;
   toasterLight.intensity += ((toaster.active ? 2.2 : 0) - toasterLight.intensity) * 0.1;
@@ -227,37 +311,62 @@ function updateToaster(dt) {
 }
 
 // ============================================================
-// KART DEL JUGADOR
+// KART DEL JUGADOR — estilo monster truck de juguete (capot visible en cámara)
 // ============================================================
 const kart = new THREE.Group();
 
-const body = new THREE.Mesh(
-  new THREE.BoxGeometry(1.1, 0.42, 2.0),
-  new THREE.MeshStandardMaterial({ color: 0x1F2A44, roughness: 0.4, metalness: 0.15 })
+const chassis = new THREE.Mesh(
+  new THREE.BoxGeometry(1.3, 0.5, 2.1),
+  new THREE.MeshStandardMaterial({ color: 0xE8B23B, roughness: 0.45, metalness: 0.1 })
 );
-body.position.y = 0.42;
-body.castShadow = true;
-kart.add(body);
+chassis.position.y = 0.62;
+chassis.castShadow = true;
+kart.add(chassis);
+
+// Capot ancho e inclinado hacia la cámara (lo que se ve en primer plano)
+const hood = new THREE.Mesh(
+  new THREE.BoxGeometry(1.5, 0.34, 1.15),
+  new THREE.MeshStandardMaterial({ color: 0xF0C24B, roughness: 0.35, metalness: 0.12 })
+);
+hood.position.set(0, 0.86, 0.55);
+hood.rotation.x = -0.12;
+hood.castShadow = true;
+kart.add(hood);
 
 const cabin = new THREE.Mesh(
-  new THREE.BoxGeometry(0.7, 0.3, 0.8),
-  new THREE.MeshStandardMaterial({ color: 0xC9A24B, roughness: 0.3, metalness: 0.2 })
+  new THREE.BoxGeometry(0.85, 0.32, 0.75),
+  new THREE.MeshStandardMaterial({ color: 0x1F2A44, roughness: 0.3, metalness: 0.2 })
 );
-cabin.position.set(0, 0.72, -0.1);
+cabin.position.set(0, 1.0, -0.35);
 cabin.castShadow = true;
 kart.add(cabin);
 
-const wheelGeo = new THREE.CylinderGeometry(0.28, 0.28, 0.24, 16);
-const wheelMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.9 });
+// Barra antivuelco (detalle tipo RC)
+const rollBar = new THREE.Mesh(
+  new THREE.TorusGeometry(0.55, 0.05, 8, 16, Math.PI),
+  new THREE.MeshStandardMaterial({ color: 0x2b2b2b, metalness: 0.5, roughness: 0.4 })
+);
+rollBar.rotation.z = Math.PI;
+rollBar.rotation.x = Math.PI / 2;
+rollBar.position.set(0, 1.15, -0.6);
+kart.add(rollBar);
+
+// Ruedas grandes tipo monster truck
+const wheelGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.42, 20);
+const wheelMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.95 });
+const hubMat = new THREE.MeshStandardMaterial({ color: 0xC9A24B, metalness: 0.5, roughness: 0.3 });
 const wheelPositions = [
-  [-0.62, 0.28, 0.7], [0.62, 0.28, 0.7],
-  [-0.62, 0.28, -0.7], [0.62, 0.28, -0.7],
+  [-0.78, 0.5, 0.78], [0.78, 0.5, 0.78],
+  [-0.78, 0.5, -0.78], [0.78, 0.5, -0.78],
 ];
 const wheels = wheelPositions.map(([x, y, z]) => {
   const w = new THREE.Mesh(wheelGeo, wheelMat);
   w.rotation.z = Math.PI / 2;
   w.position.set(x, y, z);
   w.castShadow = true;
+  const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.44, 12), hubMat);
+  hub.rotation.z = Math.PI / 2;
+  w.add(hub);
   kart.add(w);
   return w;
 });
@@ -416,15 +525,15 @@ const desiredCamPos = new THREE.Vector3();
 
 function updateCamera() {
   const f = forwardVec(car.heading);
-  const camDist = 5.4;
-  const camHeight = 1.7;
+  const camDist = 2.7;
+  const camHeight = 2.5;
   desiredCamPos.set(
     car.x - f.x * camDist,
     camHeight,
     car.z - f.z * camDist
   );
-  camera.position.lerp(desiredCamPos, 0.14);
-  camTarget.set(car.x + f.x * 3, 0.65, car.z + f.z * 3);
+  camera.position.lerp(desiredCamPos, 0.16);
+  camTarget.set(car.x + f.x * 9, 0.4, car.z + f.z * 9);
   camera.lookAt(camTarget);
 }
 
@@ -432,16 +541,34 @@ function updateCamera() {
 // HUD
 // ============================================================
 const lapValue = document.getElementById('lapValue');
-const timeValue = document.getElementById('timeValue');
 const boostFill = document.getElementById('boostFill');
 const lapToast = document.getElementById('lapToast');
+const speedoNeedle = document.getElementById('speedoNeedle');
+const speedValue = document.getElementById('speedValue');
+const minimapDot = document.getElementById('minimapDot');
+const gadgetBadge = document.getElementById('gadgetBadge');
 
 function updateHUD() {
-  lapValue.textContent = `${Math.min(state.lap, state.totalLaps)} / ${state.totalLaps}`;
-  const mins = Math.floor(state.time / 60).toString().padStart(2, '0');
-  const secs = (state.time % 60).toFixed(1).padStart(4, '0');
-  timeValue.textContent = `${mins}:${secs}`;
+  lapValue.textContent = `${Math.min(state.lap, state.totalLaps)}/${state.totalLaps}`;
   boostFill.style.width = `${car.boost}%`;
+
+  // Velocímetro
+  const kph = Math.round(Math.abs(car.speed) * 6.4);
+  speedValue.textContent = kph;
+  const maxKph = car.boostMaxSpeed * 6.4;
+  const ratio = Math.min(1, kph / maxKph);
+  const deg = -110 + ratio * 220;
+  speedoNeedle.style.transform = `translateX(-50%) rotate(${deg}deg)`;
+
+  // Gadget (boost) listo
+  gadgetBadge.classList.toggle('ready', car.boost > 15);
+
+  // Minimapa: posición del auto proyectada sobre la elipse de la pista
+  const ang = Math.atan2(car.z, car.x);
+  const mx = 50 + Math.cos(ang) * 38;
+  const my = 50 + Math.sin(ang) * 38;
+  minimapDot.style.left = `${mx}%`;
+  minimapDot.style.top = `${my}%`;
 }
 
 let lapToastTimer = null;

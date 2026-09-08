@@ -13,32 +13,47 @@
 
   <div class="stage">
 
-    <!-- HUD minimalista -->
-    <div class="hud">
-      <div class="hud-item">
-        <span class="hud-label">Vuelta</span>
-        <span class="hud-value" id="lapValue">0 / 3</span>
+    <div id="sceneContainer"></div>
+
+    <!-- HUD superior -->
+    <div class="hud-top">
+      <div class="player-badge">
+        <span class="player-dot"></span>
+        TU KART <strong>1º</strong>
       </div>
-      <div class="hud-item hud-item--center">
-        <span class="hud-label">Tiempo</span>
-        <span class="hud-value" id="timeValue">00:00.0</span>
-      </div>
-      <div class="hud-item hud-item--right">
-        <span class="hud-label">Boost</span>
-        <div class="boost-track">
-          <div class="boost-fill" id="boostFill"></div>
+      <div class="hud-top-right">
+        <div class="lap-badge">VUELTA <strong id="lapValue">0/3</strong></div>
+        <div class="minimap">
+          <div class="minimap-track"></div>
+          <div class="minimap-dot" id="minimapDot"></div>
         </div>
       </div>
     </div>
 
-    <div id="sceneContainer"></div>
+    <!-- HUD inferior -->
+    <div class="hud-bottom">
+      <div class="hud-bottom-left">
+        <div class="speedo">
+          <div class="speedo-dial">
+            <div class="speedo-needle" id="speedoNeedle"></div>
+            <div class="speedo-hub"></div>
+          </div>
+          <div class="speedo-value"><span id="speedValue">0</span><small>kph</small></div>
+        </div>
+        <div class="gadget-badge" id="gadgetBadge" title="Boost disponible">⚡</div>
+      </div>
+      <div class="hud-bottom-right">
+        <span class="hud-label">Boost</span>
+        <div class="boost-track"><div class="boost-fill" id="boostFill"></div></div>
+      </div>
+    </div>
 
     <!-- Pantalla de inicio -->
     <div class="overlay" id="startOverlay">
       <div class="panel">
         <p class="eyebrow">Recorrido — La Casa Completa</p>
         <h1>Micro-Mayhem<span>Doméstico</span></h1>
-        <p class="desc">Dale la vuelta a la casa: cocina, living, baño y pasillo, con cámara baja en tercera persona como un kart de verdad. Derrapa cerca de los muebles para cargar el boost.</p>
+        <p class="desc">Vista capot, cámara baja tipo kart. Cocina, living, baño y pasillo en un solo circuito. Derrapa cerca de los muebles para cargar el boost.</p>
         <div class="controls">
           <div class="key-row"><kbd>&larr;</kbd><kbd>&uarr;</kbd><kbd>&darr;</kbd><kbd>&rarr;</kbd><span>Conducir</span></div>
           <div class="key-row"><kbd class="wide">ESPACIO</kbd><span>Boost</span></div>

@@ -1,21 +1,38 @@
 // ============================================================
 // MICRO-MAYHEM DOMÉSTICO — Prototipo 3D (Three.js)
-// Cámara en tercera persona, baja al piso, estilo kart de carreras.
-// La pista recorre la casa completa: cocina, living, baño y pasillo.
+// Pista completa de una casa gigante: Cocina -> Pasillo -> Living
+// -> Pasillo -> Baño -> Dormitorio -> vuelta a la Cocina.
 // ============================================================
 
-// ---------- Dimensiones de la pista (unidades de mundo) ----------
-const TRACK_OUTER = { rx: 26, rz: 15.5 };
-const TRACK_INNER = { rx: 14.5, rz: 7 };
-const RING_SEGMENTS = 96;
-
-// Colores por zona de la casa (0..3), en el orden en que se recorren
-const ZONE_COLORS = [
-  0xEDE7DD, // 0: Cocina — mesada de mármol claro
-  0xD8E7EC, // 1: Baño — piso de cerámica celeste claro
-  0xB98A55, // 2: Pasillo — piso de madera cálida
-  0xC96B4A, // 3: Living — alfombra terracota
+// ---------- Definición del recorrido (waypoints de la casa) ----------
+// room: 0 Cocina | 1 Pasillo A | 2 Living | 3 Pasillo B | 4 Baño | 5 Dormitorio/Pasillo C
+const WAYPOINTS = [
+  { x: 0,   z: -50, w: 22, room: 0 }, // Cocina — pared del fondo
+  { x: 26,  z: -50, w: 20, room: 0 }, // Cocina — esquina
+  { x: 46,  z: -34, w: 10, room: 1 }, // Pasillo A — giro
+  { x: 52,  z: -6,  w: 10, room: 1 }, // Pasillo A — recta
+  { x: 46,  z: 22,  w: 24, room: 2 }, // Living — entrada
+  { x: 18,  z: 40,  w: 26, room: 2 }, // Living — centro
+  { x: -14, z: 46,  w: 12, room: 3 }, // Pasillo B — giro al baño
+  { x: -40, z: 38,  w: 16, room: 4 }, // Baño — entrada
+  { x: -54, z: 12,  w: 14, room: 4 }, // Baño — centro
+  { x: -54, z: -18, w: 14, room: 5 }, // Dormitorio — pasillo
+  { x: -36, z: -44, w: 18, room: 5 }, // Dormitorio — giro
+  { x: -14, z: -52, w: 20, room: 0 }, // vuelta a la Cocina
 ];
+const ROOM_COLORS = [
+  0xEDE7DD, // Cocina — mármol claro
+  0xB98A55, // Pasillo A — madera
+  0xC96B4A, // Living — alfombra terracota
+  0xB98A55, // Pasillo B — madera
+  0xD8E7EC, // Baño — cerámica celeste
+  0xCBB68E, // Dormitorio — piso claro
+];
+const ROOM_NAMES = ['Cocina', 'Pasillo', 'Living', 'Pasillo', 'Baño', 'Dormitorio'];
+const SAMPLES = 320;
+
+const curvePoints = WAYPOINTS.map(p => new THREE.Vector3(p.x, 0, p.z));
+const trackCurve = new THREE.CatmullRomCurve3(curvePoints, true, 'catmullrom', 0.5);
 
 // ============================================================
 // ESCENA, CÁMARA, RENDERER
@@ -24,9 +41,9 @@ const container = document.getElementById('sceneContainer');
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xcfe0e8);
-scene.fog = new THREE.Fog(0xE9DFC8, 30, 78);
+scene.fog = new THREE.Fog(0xE9DFC8, 46, 130);
 
-const camera = new THREE.PerspectiveCamera(72, 960 / 560, 0.1, 200);
+const camera = new THREE.PerspectiveCamera(72, 960 / 560, 0.1, 300);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -47,63 +64,24 @@ window.addEventListener('resize', resizeRenderer);
 const hemi = new THREE.HemisphereLight(0xfff3d6, 0x6b6459, 0.55);
 scene.add(hemi);
 
-const sun = new THREE.DirectionalLight(0xffd9a0, 1.15);
-sun.position.set(-30, 26, 18);
+const sun = new THREE.DirectionalLight(0xffd9a0, 1.2);
+sun.position.set(-60, 50, 30);
 sun.castShadow = true;
-sun.shadow.mapSize.set(1024, 1024);
-sun.shadow.camera.left = -40;
-sun.shadow.camera.right = 40;
-sun.shadow.camera.top = 40;
-sun.shadow.camera.bottom = -40;
-sun.shadow.camera.far = 100;
+sun.shadow.mapSize.set(1536, 1536);
+sun.shadow.camera.left = -90;
+sun.shadow.camera.right = 90;
+sun.shadow.camera.top = 90;
+sun.shadow.camera.bottom = -90;
+sun.shadow.camera.far = 220;
 scene.add(sun);
 
-const fill = new THREE.PointLight(0xffe3b8, 0.4, 60);
-fill.position.set(20, 10, -10);
+const fill = new THREE.PointLight(0xffe3b8, 0.35, 100);
+fill.position.set(30, 16, -10);
 scene.add(fill);
 
 // ============================================================
-// GEOMETRÍA DE LA PISTA — anillo elíptico con 4 zonas de la casa
+// PISO EXTERIOR — madera de la casa, con vetas procedurales
 // ============================================================
-function buildTrackRing() {
-  const positions = [];
-  const colors = [];
-  const indices = [];
-  const palette = ZONE_COLORS.map(c => new THREE.Color(c));
-
-  for (let i = 0; i <= RING_SEGMENTS; i++) {
-    const t = (i / RING_SEGMENTS) * Math.PI * 2;
-    const q = Math.floor(((t + Math.PI * 2) % (Math.PI * 2)) / (Math.PI / 2)) % 4;
-    const col = palette[q];
-
-    const ox = Math.cos(t) * TRACK_OUTER.rx;
-    const oz = Math.sin(t) * TRACK_OUTER.rz;
-    const ix = Math.cos(t) * TRACK_INNER.rx;
-    const iz = Math.sin(t) * TRACK_INNER.rz;
-
-    positions.push(ox, 0, oz, ix, 0, iz);
-    colors.push(col.r, col.g, col.b, col.r, col.g, col.b);
-  }
-
-  for (let i = 0; i < RING_SEGMENTS; i++) {
-    const a = i * 2, b = i * 2 + 1, c = i * 2 + 2, d = i * 2 + 3;
-    indices.push(a, b, c, b, d, c);
-  }
-
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-  geo.setIndex(indices);
-  geo.computeVertexNormals();
-
-  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.05 });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.receiveShadow = true;
-  return mesh;
-}
-scene.add(buildTrackRing());
-
-// ---------- Piso exterior (madera de la casa, con vetas procedurales) ----------
 function buildWoodTexture() {
   const c = document.createElement('canvas');
   c.width = 512; c.height = 512;
@@ -116,18 +94,16 @@ function buildWoodTexture() {
     g.lineWidth = 1 + Math.random() * 1.5;
     g.beginPath();
     g.moveTo(0, y);
-    for (let x = 0; x <= 512; x += 32) {
-      g.lineTo(x, y + Math.sin(x * 0.05 + i) * 3);
-    }
+    for (let x = 0; x <= 512; x += 32) g.lineTo(x, y + Math.sin(x * 0.05 + i) * 3);
     g.stroke();
   }
   const tex = new THREE.CanvasTexture(c);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(10, 10);
+  tex.repeat.set(24, 24);
   return tex;
 }
 const outerFloor = new THREE.Mesh(
-  new THREE.CircleGeometry(90, 48),
+  new THREE.CircleGeometry(160, 64),
   new THREE.MeshStandardMaterial({ map: buildWoodTexture(), roughness: 0.88 })
 );
 outerFloor.rotation.x = -Math.PI / 2;
@@ -135,85 +111,179 @@ outerFloor.position.y = -0.02;
 outerFloor.receiveShadow = true;
 scene.add(outerFloor);
 
-// ---------- Props decorativos: bloques tipo Lego y rampa de cartón ----------
-function addLegoScatter() {
-  const legoColors = [0xC0392B, 0xF1C40F, 0x2980B9, 0x27AE60, 0xE67E22];
-  const group = new THREE.Group();
-  for (let i = 0; i < 26; i++) {
-    const ang = Math.random() * Math.PI * 2;
-    const r = TRACK_OUTER.rx + 6 + Math.random() * 14;
-    const x = Math.cos(ang) * r * (TRACK_OUTER.rx / TRACK_OUTER.rx);
-    const z = Math.sin(ang) * (r * (TRACK_OUTER.rz / TRACK_OUTER.rx));
-    const size = 0.35 + Math.random() * 0.3;
-    const block = new THREE.Mesh(
-      new THREE.BoxGeometry(size, size, size),
-      new THREE.MeshStandardMaterial({ color: legoColors[i % legoColors.length], roughness: 0.4 })
-    );
-    block.position.set(x, size / 2, z);
-    block.rotation.y = Math.random() * Math.PI;
-    block.castShadow = true;
-    block.receiveShadow = true;
-    group.add(block);
+// ---------- Muro perimetral exterior (límite de la casa) ----------
+function buildPerimeterWalls() {
+  const pts = [];
+  for (let i = 0; i <= 64; i++) {
+    const a = (i / 64) * Math.PI * 2;
+    pts.push(new THREE.Vector3(Math.cos(a) * 92, 4.5, Math.sin(a) * 78));
   }
-  // Rampa de cartón decorativa
-  const ramp = new THREE.Mesh(
-    new THREE.BoxGeometry(3, 0.3, 1.6),
-    new THREE.MeshStandardMaterial({ color: 0xC9A24B, roughness: 0.9 })
-  );
-  ramp.position.set(-(TRACK_OUTER.rx + 10), 0.5, -8);
-  ramp.rotation.z = 0.35;
-  ramp.castShadow = true;
-  group.add(ramp);
-  scene.add(group);
+  for (let i = 0; i < 64; i++) {
+    const a = pts[i], b = pts[i + 1];
+    const mid = a.clone().add(b).multiplyScalar(0.5);
+    const len = a.distanceTo(b);
+    const wall = new THREE.Mesh(
+      new THREE.BoxGeometry(len * 1.05, 9, 0.6),
+      new THREE.MeshStandardMaterial({ color: 0xF4F1EA, roughness: 0.9 })
+    );
+    wall.position.set(mid.x, 4.5, mid.z);
+    wall.lookAt(new THREE.Vector3(0, 4.5, 0));
+    wall.receiveShadow = true;
+    wall.castShadow = true;
+    scene.add(wall);
+  }
 }
-addLegoScatter();
+buildPerimeterWalls();
 
-// ---------- Isla central (muebles/isla de cocina, obstáculo sólido) ----------
-const island = new THREE.Mesh(
-  new THREE.CylinderGeometry(1, 1, 1.1, 32, 1, false),
-  new THREE.MeshStandardMaterial({ color: 0x6b4a2c, roughness: 0.7 })
-);
-island.scale.set(TRACK_INNER.rx * 0.92, 1, TRACK_INNER.rz * 0.92);
-island.position.y = 0.55;
-island.castShadow = true;
-island.receiveShadow = true;
-scene.add(island);
-
-// ---------- Paredes perimetrales de la casa ----------
-function makeWallSegment(cx, cz, rotY, width) {
-  const wall = new THREE.Mesh(
-    new THREE.BoxGeometry(width, 8, 0.6),
-    new THREE.MeshStandardMaterial({ color: 0xF4F1EA, roughness: 0.9 })
-  );
-  wall.position.set(cx, 4, cz);
-  wall.rotation.y = rotY;
-  wall.receiveShadow = true;
-  wall.castShadow = true;
-  scene.add(wall);
-}
-const wallDist = TRACK_OUTER.rx + 6;
-makeWallSegment(0, -TRACK_OUTER.rz - 6, 0, TRACK_OUTER.rx * 2.3);
-makeWallSegment(0, TRACK_OUTER.rz + 6, 0, TRACK_OUTER.rx * 2.3);
-makeWallSegment(-wallDist, 0, Math.PI / 2, TRACK_OUTER.rz * 2.3);
-makeWallSegment(wallDist, 0, Math.PI / 2, TRACK_OUTER.rz * 2.3);
-
-// Ventana con luz cálida (hint de "hora dorada")
+// Ventana con luz cálida (hora dorada)
 const windowGlow = new THREE.Mesh(
-  new THREE.PlaneGeometry(8, 4.5),
+  new THREE.PlaneGeometry(10, 5),
   new THREE.MeshBasicMaterial({ color: 0xfff3c4, transparent: true, opacity: 0.9 })
 );
-windowGlow.position.set(-wallDist + 0.31, 5, -6);
-windowGlow.rotation.y = Math.PI / 2;
+windowGlow.position.set(-80, 5.5, -20);
+windowGlow.rotation.y = Math.PI / 2.6;
 scene.add(windowGlow);
 
 // ============================================================
-// TOSTADORA — evento dinámico (calor / distorsión)
+// PISTA — cinta que sigue la curva de la casa, con ancho y color
+// variables según el ambiente (cocina/pasillo/living/baño/dormitorio)
 // ============================================================
-const toaster = {
-  active: false,
-  timer: 0,
-  x: 8, z: 4, radius: 6,
-};
+const trackSamples = []; // {x,z,nx,nz,halfWidth}
+
+function buildTrackRibbon() {
+  const positions = [];
+  const colors = [];
+  const indices = [];
+  const roomCols = ROOM_COLORS.map(c => new THREE.Color(c));
+  const N = WAYPOINTS.length;
+
+  for (let j = 0; j <= SAMPLES; j++) {
+    const t = (j % SAMPLES) / SAMPLES;
+    const pos = trackCurve.getPointAt(t);
+    const tan = trackCurve.getTangentAt(t).normalize();
+    const nx = -tan.z, nz = tan.x;
+
+    const idx = t * N;
+    const i0 = Math.floor(idx) % N;
+    const i1 = (i0 + 1) % N;
+    const frac = idx - Math.floor(idx);
+    const halfWidth = THREE.MathUtils.lerp(WAYPOINTS[i0].w, WAYPOINTS[i1].w, frac) / 2;
+    const col = roomCols[WAYPOINTS[i0].room].clone().lerp(roomCols[WAYPOINTS[i1].room], frac);
+
+    if (j < SAMPLES) trackSamples.push({ x: pos.x, z: pos.z, nx, nz, halfWidth });
+
+    positions.push(pos.x + nx * halfWidth, 0, pos.z + nz * halfWidth);
+    positions.push(pos.x - nx * halfWidth, 0, pos.z - nz * halfWidth);
+    colors.push(col.r, col.g, col.b, col.r, col.g, col.b);
+  }
+
+  for (let i = 0; i < SAMPLES; i++) {
+    const a = i * 2, b = i * 2 + 1, c = i * 2 + 2, d = i * 2 + 3;
+    indices.push(a, b, c, b, d, c);
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+
+  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, metalness: 0.05 });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.y = 0.01;
+  mesh.receiveShadow = true;
+  return mesh;
+}
+scene.add(buildTrackRibbon());
+
+// Línea de meta sobre el primer segmento
+(function drawFinishLine() {
+  const p0 = trackSamples[0];
+  const line = new THREE.Mesh(
+    new THREE.PlaneGeometry(p0.halfWidth * 2, 1.4),
+    new THREE.MeshBasicMaterial({ color: 0x1F2A44 })
+  );
+  line.rotation.x = -Math.PI / 2;
+  line.position.set(p0.x, 0.02, p0.z);
+  const ang = Math.atan2(p0.nz, p0.nx);
+  line.rotation.z = -ang;
+  scene.add(line);
+})();
+
+// ============================================================
+// MOBILIARIO POR AMBIENTE (da identidad a cada sala)
+// ============================================================
+function addProp(geo, mat, x, y, z, ry) {
+  const m = new THREE.Mesh(geo, mat);
+  m.position.set(x, y, z);
+  if (ry) m.rotation.y = ry;
+  m.castShadow = true;
+  m.receiveShadow = true;
+  scene.add(m);
+  return m;
+}
+
+// --- Isla de cocina (obstáculo sólido con la tostadora encima) ---
+const island = addProp(
+  new THREE.BoxGeometry(9, 1.1, 5),
+  new THREE.MeshStandardMaterial({ color: 0x6b4a2c, roughness: 0.7 }),
+  12, 0.55, -42
+);
+const ISLAND = { x: 12, z: -42, rx: 5.2, rz: 3.0 };
+
+// --- Living: sillón ---
+addProp(
+  new THREE.BoxGeometry(6, 1.6, 3),
+  new THREE.MeshStandardMaterial({ color: 0xC96B4A, roughness: 0.85 }),
+  36, 0.8, 34, 0.5
+);
+addProp(
+  new THREE.CylinderGeometry(1.4, 1.4, 0.4, 24),
+  new THREE.MeshStandardMaterial({ color: 0x2b2b2b, roughness: 0.6 }),
+  18, 0.22, 44
+);
+
+// --- Baño: bañera ---
+addProp(
+  new THREE.BoxGeometry(6, 1.6, 3.2),
+  new THREE.MeshStandardMaterial({ color: 0xFFFFFF, roughness: 0.3, metalness: 0.05 }),
+  -48, 0.8, 6, 0.3
+);
+
+// --- Dormitorio: cama ---
+addProp(
+  new THREE.BoxGeometry(6, 1.4, 8),
+  new THREE.MeshStandardMaterial({ color: 0x8B5E34, roughness: 0.8 }),
+  -44, 0.7, -30, -0.2
+);
+addProp(
+  new THREE.BoxGeometry(5.4, 0.8, 7),
+  new THREE.MeshStandardMaterial({ color: 0xF4F1EA, roughness: 0.9 }),
+  -44, 1.5, -30, -0.2
+);
+
+// --- Bloques tipo Lego dispersos en el pasillo/entrada ---
+(function addLegoScatter() {
+  const legoColors = [0xC0392B, 0xF1C40F, 0x2980B9, 0x27AE60, 0xE67E22];
+  for (let i = 0; i < 30; i++) {
+    const t = Math.random();
+    const p = trackCurve.getPointAt(t);
+    const tan = trackCurve.getTangentAt(t);
+    const nx = -tan.z, nz = tan.x;
+    const side = (Math.random() < 0.5 ? -1 : 1) * (9 + Math.random() * 6);
+    const size = 0.4 + Math.random() * 0.35;
+    addProp(
+      new THREE.BoxGeometry(size, size, size),
+      new THREE.MeshStandardMaterial({ color: legoColors[i % legoColors.length], roughness: 0.4 }),
+      p.x + nx * side, size / 2, p.z + nz * side, Math.random() * Math.PI
+    );
+  }
+})();
+
+// ============================================================
+// TOSTADORA — evento dinámico (calor + dispara pan)
+// ============================================================
+const toaster = { active: false, timer: 0, x: 12, z: -39, radius: 6.5 };
 const toasterGroup = new THREE.Group();
 const toasterBody = new THREE.Mesh(
   new THREE.BoxGeometry(1.6, 1.1, 1.1),
@@ -222,14 +292,12 @@ const toasterBody = new THREE.Mesh(
 toasterBody.castShadow = true;
 toasterGroup.add(toasterBody);
 const toasterGlowMat = new THREE.MeshBasicMaterial({ color: 0xE4572E, transparent: true, opacity: 0 });
-const toasterGlow = new THREE.Mesh(new THREE.SphereGeometry(2.4, 16, 16), toasterGlowMat);
-toasterGroup.add(toasterGlow);
+toasterGroup.add(new THREE.Mesh(new THREE.SphereGeometry(2.4, 16, 16), toasterGlowMat));
 const toasterLight = new THREE.PointLight(0xE4572E, 0, 10);
 toasterGroup.add(toasterLight);
-toasterGroup.position.set(toaster.x, island.position.y + 1.1, toaster.z);
+toasterGroup.position.set(toaster.x, 1.1 + 0.55, toaster.z);
 scene.add(toasterGroup);
 
-// Rebanada de pan que sale disparada cuando se activa la tostadora
 const toastSlices = [];
 function spawnToast() {
   const slice = new THREE.Mesh(
@@ -249,14 +317,10 @@ function updateToastSlices(dt) {
     t.vy -= 9 * dt;
     t.mesh.rotation.x += dt * 4;
     t.life -= dt;
-    if (t.life <= 0) {
-      scene.remove(t.mesh);
-      toastSlices.splice(i, 1);
-    }
+    if (t.life <= 0) { scene.remove(t.mesh); toastSlices.splice(i, 1); }
   }
 }
 
-// ---------- Partículas: migas de la tostadora + chispas de boost ----------
 const particleGeo = new THREE.SphereGeometry(0.06, 6, 6);
 const sparkPool = [];
 function spawnParticle(x, y, z, vx, vy, vz, color, life) {
@@ -276,42 +340,31 @@ function updateParticles(dt) {
     p.life -= dt;
     p.mesh.material.opacity = Math.max(0, p.life / p.maxLife);
     p.mesh.material.transparent = true;
-    if (p.life <= 0) {
-      scene.remove(p.mesh);
-      p.mesh.material.dispose();
-      sparkPool.splice(i, 1);
-    }
+    if (p.life <= 0) { scene.remove(p.mesh); p.mesh.material.dispose(); sparkPool.splice(i, 1); }
   }
 }
 
 function updateToaster(dt) {
   toaster.timer += dt;
   if (!toaster.active && toaster.timer > 6) {
-    toaster.active = true;
-    toaster.timer = 0;
-    spawnToast();
+    toaster.active = true; toaster.timer = 0; spawnToast();
   } else if (toaster.active && toaster.timer > 3) {
-    toaster.active = false;
-    toaster.timer = 0;
+    toaster.active = false; toaster.timer = 0;
   }
   updateToastSlices(dt);
   const targetOpacity = toaster.active ? 0.55 : 0;
   toasterGlowMat.opacity += (targetOpacity - toasterGlowMat.opacity) * 0.1;
   toasterLight.intensity += ((toaster.active ? 2.2 : 0) - toasterLight.intensity) * 0.1;
-
   if (toaster.active && Math.random() < 0.5) {
     spawnParticle(
-      toaster.x + (Math.random() - 0.5) * 0.8,
-      toasterGroup.position.y + 0.6,
-      toaster.z + (Math.random() - 0.5) * 0.8,
-      (Math.random() - 0.5) * 1.5, 2 + Math.random(), (Math.random() - 0.5) * 1.5,
-      0xC9A24B, 0.9
+      toaster.x + (Math.random() - 0.5) * 0.8, toasterGroup.position.y + 0.6, toaster.z + (Math.random() - 0.5) * 0.8,
+      (Math.random() - 0.5) * 1.5, 2 + Math.random(), (Math.random() - 0.5) * 1.5, 0xC9A24B, 0.9
     );
   }
 }
 
 // ============================================================
-// KART DEL JUGADOR — estilo monster truck de juguete (capot visible en cámara)
+// KART DEL JUGADOR — estilo monster truck de juguete
 // ============================================================
 const kart = new THREE.Group();
 
@@ -323,7 +376,6 @@ chassis.position.y = 0.62;
 chassis.castShadow = true;
 kart.add(chassis);
 
-// Capot ancho e inclinado hacia la cámara (lo que se ve en primer plano)
 const hood = new THREE.Mesh(
   new THREE.BoxGeometry(1.5, 0.34, 1.15),
   new THREE.MeshStandardMaterial({ color: 0xF0C24B, roughness: 0.35, metalness: 0.12 })
@@ -341,7 +393,6 @@ cabin.position.set(0, 1.0, -0.35);
 cabin.castShadow = true;
 kart.add(cabin);
 
-// Barra antivuelco (detalle tipo RC)
 const rollBar = new THREE.Mesh(
   new THREE.TorusGeometry(0.55, 0.05, 8, 16, Math.PI),
   new THREE.MeshStandardMaterial({ color: 0x2b2b2b, metalness: 0.5, roughness: 0.4 })
@@ -351,7 +402,6 @@ rollBar.rotation.x = Math.PI / 2;
 rollBar.position.set(0, 1.15, -0.6);
 kart.add(rollBar);
 
-// Ruedas grandes tipo monster truck
 const wheelGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.42, 20);
 const wheelMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.95 });
 const hubMat = new THREE.MeshStandardMaterial({ color: 0xC9A24B, metalness: 0.5, roughness: 0.3 });
@@ -374,15 +424,18 @@ const wheels = wheelPositions.map(([x, y, z]) => {
 scene.add(kart);
 
 // ============================================================
-// FÍSICA ARCADE (estilo Mario Kart)
+// FÍSICA ARCADE (estilo Mario Kart) sobre la cinta de la pista
 // ============================================================
+const startTangent = trackCurve.getTangentAt(0).normalize();
+const startHeading = Math.atan2(startTangent.x, startTangent.z);
+
 const car = {
-  x: 0, z: -(TRACK_OUTER.rz + TRACK_INNER.rz) / 2,
-  heading: Math.PI / 2,
+  x: trackSamples[0].x, z: trackSamples[0].z,
+  heading: startHeading,
   speed: 0,
-  maxSpeed: 15.5,
-  boostMaxSpeed: 23,
-  accel: 0.42,
+  maxSpeed: 17,
+  boostMaxSpeed: 25,
+  accel: 0.44,
   turnRate: 2.1,
   friction: 0.985,
   boost: 100,
@@ -390,16 +443,27 @@ const car = {
   isBoosting: false,
 };
 
-function forwardVec(heading) {
-  return { x: Math.sin(heading), z: Math.cos(heading) };
-}
+function forwardVec(heading) { return { x: Math.sin(heading), z: Math.cos(heading) }; }
 
 const keys = {};
 window.addEventListener('keydown', (e) => { keys[e.code] = true; });
 window.addEventListener('keyup', (e) => { keys[e.code] = false; });
 
-function ellipseValue(x, z, rx, rz) {
-  return (x / rx) * (x / rx) + (z / rz) * (z / rz);
+// ---------- Búsqueda del punto de pista más cercano (ventana local) ----------
+let nearestIdx = 0;
+function findNearestSample(x, z) {
+  const N = trackSamples.length;
+  let best = -1, bestD = Infinity;
+  const WINDOW = 24;
+  for (let k = -WINDOW; k <= WINDOW; k++) {
+    const i = ((nearestIdx + k) % N + N) % N;
+    const s = trackSamples[i];
+    const dx = x - s.x, dz = z - s.z;
+    const d = dx * dx + dz * dz;
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  nearestIdx = best;
+  return best;
 }
 
 function updateCar(dt) {
@@ -440,37 +504,43 @@ function updateCar(dt) {
 
   // Distorsión de calor cerca de la tostadora
   let heatFactor = 1;
-  if (toaster.active) {
-    const dx = car.x - toaster.x, dz = car.z - toaster.z;
-    if (Math.sqrt(dx * dx + dz * dz) < toaster.radius) heatFactor = 0.55;
-  }
+  const tdx = car.x - toaster.x, tdz = car.z - toaster.z;
+  if (toaster.active && Math.sqrt(tdx * tdx + tdz * tdz) < toaster.radius) heatFactor = 0.55;
 
   const f = forwardVec(car.heading);
   let nx = car.x + f.x * car.speed * dt * heatFactor;
   let nz = car.z + f.z * car.speed * dt * heatFactor;
 
-  // Colisión con isla central (empuja hacia afuera)
-  const innerVal = ellipseValue(nx, nz, TRACK_INNER.rx * 0.9, TRACK_INNER.rz * 0.9);
-  if (innerVal < 1) {
-    const ang = Math.atan2(nz, nx);
-    nx = Math.cos(ang) * TRACK_INNER.rx * 0.9 * 1.02;
-    nz = Math.sin(ang) * TRACK_INNER.rz * 0.9 * 1.02;
-    car.speed *= 0.55;
-  } else if (innerVal < 1.15 && Math.abs(car.speed) > 6) {
-    car.boost = Math.min(car.boostMax, car.boost + dt * 26);
+  // Colisión con la isla de la cocina
+  const idx = nx - ISLAND.x, idz = nz - ISLAND.z;
+  const islandVal = (idx / ISLAND.rx) * (idx / ISLAND.rx) + (idz / ISLAND.rz) * (idz / ISLAND.rz);
+  if (islandVal < 1) {
+    const ang = Math.atan2(idz, idx);
+    nx = ISLAND.x + Math.cos(ang) * ISLAND.rx * 1.03;
+    nz = ISLAND.z + Math.sin(ang) * ISLAND.rz * 1.03;
+    car.speed *= 0.5;
+  } else if (islandVal < 1.2 && Math.abs(car.speed) > 6) {
+    car.boost = Math.min(car.boostMax, car.boost + dt * 26); // near-miss
   }
 
-  // Colisión con pared exterior de la casa (empuja hacia adentro)
-  const outerVal = ellipseValue(nx, nz, TRACK_OUTER.rx * 0.97, TRACK_OUTER.rz * 0.97);
-  if (outerVal > 1) {
-    const ang = Math.atan2(nz, nx);
-    nx = Math.cos(ang) * TRACK_OUTER.rx * 0.97;
-    nz = Math.sin(ang) * TRACK_OUTER.rz * 0.97;
-    car.speed *= 0.55;
+  // Colisión con los bordes de la pista (paredes/muebles del ambiente)
+  const si = findNearestSample(nx, nz);
+  const s = trackSamples[si];
+  const lateral = (nx - s.x) * s.nx + (nz - s.z) * s.nz;
+  const limit = s.halfWidth * 0.97;
+  if (lateral > limit) {
+    const push = lateral - limit;
+    nx -= push * s.nx; nz -= push * s.nz;
+    car.speed *= 0.6;
+  } else if (lateral < -limit) {
+    const push = lateral + limit;
+    nx -= push * s.nx; nz -= push * s.nz;
+    car.speed *= 0.6;
+  } else if (Math.abs(lateral) > s.halfWidth * 0.85 && Math.abs(car.speed) > 6) {
+    car.boost = Math.min(car.boostMax, car.boost + dt * 22); // roce cercano al borde
   }
 
-  car.x = nx;
-  car.z = nz;
+  car.x = nx; car.z = nz;
 
   kart.position.set(car.x, 0, car.z);
   kart.rotation.y = car.heading;
@@ -479,59 +549,37 @@ function updateCar(dt) {
   const steerLean = ((left ? 1 : 0) - (right ? 1 : 0)) * 0.08;
   kart.rotation.z = THREE.MathUtils.lerp(kart.rotation.z, -steerLean, 0.15);
 
-  updateLapProgress();
+  updateLapProgress(si);
 }
 
 // ============================================================
-// VUELTAS
+// VUELTAS — progreso a lo largo de la curva de la pista
 // ============================================================
 const state = {
-  running: false,
-  finished: false,
-  time: 0,
-  lap: 0,
-  totalLaps: 3,
-  checkpoint: 0,
-  lastQuadrant: 0,
+  running: false, finished: false, time: 0,
+  lap: 0, totalLaps: 3, prevProgress: 0,
 };
 
-function angleQuadrant(x, z) {
-  const a = Math.atan2(z, x);
-  const norm = (a + Math.PI * 2) % (Math.PI * 2);
-  return Math.floor(norm / (Math.PI / 2)) % 4;
-}
-
-function updateLapProgress() {
-  const q = angleQuadrant(car.x, car.z);
-  if (q !== state.lastQuadrant) {
-    const expected = state.checkpoint % 4;
-    if (q === expected) {
-      state.checkpoint++;
-      if (state.checkpoint % 4 === 0) {
-        state.lap++;
-        showLapToast();
-        if (state.lap >= state.totalLaps) finishRace();
-      }
-    }
-    state.lastQuadrant = q;
+function updateLapProgress(sampleIndex) {
+  const progress = sampleIndex / trackSamples.length;
+  if (state.prevProgress > 0.85 && progress < 0.15) {
+    state.lap++;
+    showLapToast();
+    if (state.lap >= state.totalLaps) finishRace();
   }
+  state.prevProgress = progress;
 }
 
 // ============================================================
-// CÁMARA — tercera persona, baja al piso, tipo kart
+// CÁMARA — tercera persona, baja al piso, tipo hood-cam
 // ============================================================
 const camTarget = new THREE.Vector3();
 const desiredCamPos = new THREE.Vector3();
 
 function updateCamera() {
   const f = forwardVec(car.heading);
-  const camDist = 2.7;
-  const camHeight = 2.5;
-  desiredCamPos.set(
-    car.x - f.x * camDist,
-    camHeight,
-    car.z - f.z * camDist
-  );
+  const camDist = 2.7, camHeight = 2.5;
+  desiredCamPos.set(car.x - f.x * camDist, camHeight, car.z - f.z * camDist);
   camera.position.lerp(desiredCamPos, 0.16);
   camTarget.set(car.x + f.x * 9, 0.4, car.z + f.z * 9);
   camera.lookAt(camTarget);
@@ -547,28 +595,27 @@ const speedoNeedle = document.getElementById('speedoNeedle');
 const speedValue = document.getElementById('speedValue');
 const minimapDot = document.getElementById('minimapDot');
 const gadgetBadge = document.getElementById('gadgetBadge');
+const roomLabel = document.getElementById('roomLabel');
 
-function updateHUD() {
+function updateHUD(sampleIndex) {
   lapValue.textContent = `${Math.min(state.lap, state.totalLaps)}/${state.totalLaps}`;
   boostFill.style.width = `${car.boost}%`;
 
-  // Velocímetro
   const kph = Math.round(Math.abs(car.speed) * 6.4);
   speedValue.textContent = kph;
   const maxKph = car.boostMaxSpeed * 6.4;
   const ratio = Math.min(1, kph / maxKph);
-  const deg = -110 + ratio * 220;
-  speedoNeedle.style.transform = `translateX(-50%) rotate(${deg}deg)`;
+  speedoNeedle.style.transform = `translateX(-50%) rotate(${-110 + ratio * 220}deg)`;
 
-  // Gadget (boost) listo
   gadgetBadge.classList.toggle('ready', car.boost > 15);
 
-  // Minimapa: posición del auto proyectada sobre la elipse de la pista
-  const ang = Math.atan2(car.z, car.x);
-  const mx = 50 + Math.cos(ang) * 38;
-  const my = 50 + Math.sin(ang) * 38;
+  const t = sampleIndex / trackSamples.length;
+  const mx = 8 + t * 84;
   minimapDot.style.left = `${mx}%`;
-  minimapDot.style.top = `${my}%`;
+  minimapDot.style.top = `50%`;
+
+  const idx = Math.floor(t * WAYPOINTS.length) % WAYPOINTS.length;
+  roomLabel.textContent = ROOM_NAMES[WAYPOINTS[idx].room];
 }
 
 let lapToastTimer = null;
@@ -587,16 +634,16 @@ const finishOverlay = document.getElementById('finishOverlay');
 const finalTime = document.getElementById('finalTime');
 
 function resetGame() {
-  car.x = 0;
-  car.z = -(TRACK_OUTER.rz + TRACK_INNER.rz) / 2;
-  car.heading = Math.PI / 2;
+  car.x = trackSamples[0].x;
+  car.z = trackSamples[0].z;
+  car.heading = startHeading;
   car.speed = 0;
   car.boost = car.boostMax;
   state.time = 0;
   state.lap = 0;
-  state.checkpoint = 0;
-  state.lastQuadrant = angleQuadrant(car.x, car.z);
+  state.prevProgress = 0;
   state.finished = false;
+  nearestIdx = 0;
   toaster.active = false;
   toaster.timer = 0;
   kart.position.set(car.x, 0, car.z);
@@ -635,7 +682,7 @@ function loop(now) {
     updateCar(dt);
     updateToaster(dt);
     state.time += dt;
-    updateHUD();
+    updateHUD(nearestIdx);
   }
   updateParticles(dt);
   updateCamera();

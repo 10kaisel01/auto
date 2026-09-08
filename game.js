@@ -41,7 +41,7 @@ const container = document.getElementById('sceneContainer');
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xcfe0e8);
-scene.fog = new THREE.Fog(0xE9DFC8, 46, 130);
+scene.fog = new THREE.Fog(0xE9DFC8, 30, 95);
 
 const camera = new THREE.PerspectiveCamera(72, 960 / 560, 0.1, 300);
 
@@ -103,7 +103,7 @@ function buildWoodTexture() {
   return tex;
 }
 const outerFloor = new THREE.Mesh(
-  new THREE.CircleGeometry(160, 64),
+  new THREE.CircleGeometry(75, 64),
   new THREE.MeshStandardMaterial({ map: buildWoodTexture(), roughness: 0.88 })
 );
 outerFloor.rotation.x = -Math.PI / 2;
@@ -111,12 +111,12 @@ outerFloor.position.y = -0.02;
 outerFloor.receiveShadow = true;
 scene.add(outerFloor);
 
-// ---------- Muro perimetral exterior (límite de la casa) ----------
+// ---------- Muro perimetral exterior (límite de la casa, pegado a la pista) ----------
 function buildPerimeterWalls() {
   const pts = [];
   for (let i = 0; i <= 64; i++) {
     const a = (i / 64) * Math.PI * 2;
-    pts.push(new THREE.Vector3(Math.cos(a) * 92, 4.5, Math.sin(a) * 78));
+    pts.push(new THREE.Vector3(Math.cos(a) * 66, 4.5, Math.sin(a) * 60));
   }
   for (let i = 0; i < 64; i++) {
     const a = pts[i], b = pts[i + 1];
@@ -210,6 +210,33 @@ scene.add(buildTrackRibbon());
   scene.add(line);
 })();
 
+// Marcos de puerta entre ambientes (refuerzan la sensación de habitaciones separadas)
+(function addDoorFrames() {
+  const N = WAYPOINTS.length;
+  const doorMat = new THREE.MeshStandardMaterial({ color: 0xB98A55, roughness: 0.7 });
+  for (let i = 0; i < N; i++) {
+    const nextIdx = (i + 1) % N;
+    if (WAYPOINTS[i].room === WAYPOINTS[nextIdx].room) continue;
+    const sIdx = Math.round((nextIdx / N) * SAMPLES) % trackSamples.length;
+    const s = trackSamples[sIdx];
+    [1, -1].forEach(side => {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.5, 6.5, 0.5), doorMat);
+      post.position.set(
+        s.x + s.nx * (s.halfWidth + 0.6) * side,
+        3.25,
+        s.z + s.nz * (s.halfWidth + 0.6) * side
+      );
+      post.castShadow = true;
+      scene.add(post);
+    });
+    const lintel = new THREE.Mesh(new THREE.BoxGeometry(s.halfWidth * 2 + 1.6, 0.5, 0.5), doorMat);
+    lintel.position.set(s.x, 6.2, s.z);
+    lintel.rotation.y = Math.atan2(s.nx, s.nz) + Math.PI / 2;
+    lintel.castShadow = true;
+    scene.add(lintel);
+  }
+})();
+
 // ============================================================
 // MOBILIARIO POR AMBIENTE (da identidad a cada sala)
 // ============================================================
@@ -270,7 +297,7 @@ addProp(
     const p = trackCurve.getPointAt(t);
     const tan = trackCurve.getTangentAt(t);
     const nx = -tan.z, nz = tan.x;
-    const side = (Math.random() < 0.5 ? -1 : 1) * (9 + Math.random() * 6);
+    const side = (Math.random() < 0.5 ? -1 : 1) * (3.5 + Math.random() * 3);
     const size = 0.4 + Math.random() * 0.35;
     addProp(
       new THREE.BoxGeometry(size, size, size),

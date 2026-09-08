@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Micro-Mayhem Doméstico — Prototipo Jugable</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <div class="stage">
+
+    <!-- HUD minimalista -->
+    <div class="hud">
+      <div class="hud-item">
+        <span class="hud-label">Vuelta</span>
+        <span class="hud-value" id="lapValue">0 / 3</span>
+      </div>
+      <div class="hud-item hud-item--center">
+        <span class="hud-label">Tiempo</span>
+        <span class="hud-value" id="timeValue">00:00.0</span>
+      </div>
+      <div class="hud-item hud-item--right">
+        <span class="hud-label">Boost</span>
+        <div class="boost-track">
+          <div class="boost-fill" id="boostFill"></div>
+        </div>
+      </div>
+    </div>
+
+    <canvas id="gameCanvas" width="900" height="560"></canvas>
+
+    <!-- Pantalla de inicio -->
+    <div class="overlay" id="startOverlay">
+      <div class="panel">
+        <p class="eyebrow">Pista 1 — El Gran Escape de la Cocina</p>
+        <h1>Micro-Mayhem<span>Doméstico</span></h1>
+        <p class="desc">Da vueltas a la mesada antes de que la tostadora se caliente. Derrapa cerca de los bordes para cargar el boost.</p>
+        <div class="controls">
+          <div class="key-row"><kbd>&larr;</kbd><kbd>&uarr;</kbd><kbd>&darr;</kbd><kbd>&rarr;</kbd><span>Conducir</span></div>
+          <div class="key-row"><kbd class="wide">ESPACIO</kbd><span>Boost</span></div>
+        </div>
+        <button class="btn" id="startBtn">Arrancar motores</button>
+      </div>
+    </div>
+
+    <!-- Pantalla de meta -->
+    <div class="overlay hidden" id="finishOverlay">
+      <div class="panel">
+        <p class="eyebrow">¡Carrera terminada!</p>
+        <h1 class="finish-title">Vuelta completada</h1>
+        <p class="desc final-time">Tiempo final: <strong id="finalTime">00:00.0</strong></p>
+        <button class="btn" id="restartBtn">Correr de nuevo</button>
+      </div>
+    </div>
+
+    <!-- Toast de vuelta -->
+    <div class="lap-toast hidden" id="lapToast">¡Vuelta completada!</div>
+
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>

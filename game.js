@@ -4,8 +4,10 @@
 // -> Pasillo -> Baño -> Dormitorio -> vuelta a la Cocina.
 // ============================================================
 
-// ---------- Definición del recorrido (waypoints de la casa) ----------
-// room: 0 Cocina | 1 Pasillo A | 2 Living | 3 Pasillo B | 4 Baño | 5 Dormitorio/Pasillo C
+// ---------- Escala general de la casa ("casa gigantezca" + vueltas más largas) ----------
+const SCALE = 4.5;
+const PROP_SCALE = 2.1; // escala de muebles/props (más chica que SCALE: el kart se siente diminuto)
+
 const WAYPOINTS = [
   { x: 0,   z: -50, w: 22, room: 0 }, // Cocina — pared del fondo
   { x: 26,  z: -50, w: 20, room: 0 }, // Cocina — esquina
@@ -19,7 +21,7 @@ const WAYPOINTS = [
   { x: -54, z: -18, w: 14, room: 5 }, // Dormitorio — pasillo
   { x: -36, z: -44, w: 18, room: 5 }, // Dormitorio — giro
   { x: -14, z: -52, w: 20, room: 0 }, // vuelta a la Cocina
-];
+].map(p => ({ x: p.x * SCALE, z: p.z * SCALE, w: p.w * SCALE, room: p.room }));
 const ROOM_COLORS = [
   0xEDE7DD, // Cocina — mármol claro
   0xB98A55, // Pasillo A — madera
@@ -41,9 +43,9 @@ const container = document.getElementById('sceneContainer');
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xcfe0e8);
-scene.fog = new THREE.Fog(0xE9DFC8, 30, 95);
+scene.fog = new THREE.Fog(0xE9DFC8, 140, 430);
 
-const camera = new THREE.PerspectiveCamera(58, 960 / 560, 0.1, 300);
+const camera = new THREE.PerspectiveCamera(58, 960 / 560, 0.1, 900);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -65,14 +67,14 @@ const hemi = new THREE.HemisphereLight(0xfff3d6, 0x6b6459, 0.55);
 scene.add(hemi);
 
 const sun = new THREE.DirectionalLight(0xffd9a0, 1.2);
-sun.position.set(-60, 50, 30);
+sun.position.set(-220, 180, 110);
 sun.castShadow = true;
 sun.shadow.mapSize.set(1536, 1536);
-sun.shadow.camera.left = -90;
-sun.shadow.camera.right = 90;
-sun.shadow.camera.top = 90;
-sun.shadow.camera.bottom = -90;
-sun.shadow.camera.far = 220;
+sun.shadow.camera.left = -320;
+sun.shadow.camera.right = 320;
+sun.shadow.camera.top = 320;
+sun.shadow.camera.bottom = -320;
+sun.shadow.camera.far = 700;
 scene.add(sun);
 
 const fill = new THREE.PointLight(0xffe3b8, 0.35, 100);
@@ -99,11 +101,11 @@ function buildWoodTexture() {
   }
   const tex = new THREE.CanvasTexture(c);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(24, 24);
+  tex.repeat.set(100, 100);
   return tex;
 }
 const outerFloor = new THREE.Mesh(
-  new THREE.CircleGeometry(75, 64),
+  new THREE.CircleGeometry(320, 64),
   new THREE.MeshStandardMaterial({ map: buildWoodTexture(), roughness: 0.88 })
 );
 outerFloor.rotation.x = -Math.PI / 2;
@@ -168,45 +170,81 @@ scene.add(buildTrackRibbon());
 // ---------- Muros de la casa: siguen los bordes reales de la pista ----------
 // El margen es proporcional al ancho del ambiente: pasillos angostos quedan
 // ajustados (sensación de corredor) y las salas anchas quedan más abiertas.
-function buildTrackWalls() {
-  const wallMat = new THREE.MeshStandardMaterial({ color: 0xF4F1EA, roughness: 0.9 });
+const WALL_MARGIN_MIN = 3 * PROP_SCALE;
+const WALL_HEIGHT = 15;
+
+function buildWallRibbon(sign) {
   const N = trackSamples.length;
-  function sideWall(sign) {
-    for (let i = 0; i < N; i++) {
-      const s0 = trackSamples[i];
-      const s1 = trackSamples[(i + 1) % N];
-      const m0 = Math.max(3, s0.halfWidth * 0.4);
-      const m1 = Math.max(3, s1.halfWidth * 0.4);
-      const p0x = s0.x + s0.nx * (s0.halfWidth + m0) * sign;
-      const p0z = s0.z + s0.nz * (s0.halfWidth + m0) * sign;
-      const p1x = s1.x + s1.nx * (s1.halfWidth + m1) * sign;
-      const p1z = s1.z + s1.nz * (s1.halfWidth + m1) * sign;
-      const len = Math.hypot(p1x - p0x, p1z - p0z);
-      if (len < 0.001) continue;
-      const wall = new THREE.Mesh(new THREE.BoxGeometry(len * 1.15, 8, 0.6), wallMat);
-      wall.position.set((p0x + p1x) / 2, 4, (p0z + p1z) / 2);
-      wall.rotation.y = Math.atan2(p1x - p0x, p1z - p0z);
-      wall.receiveShadow = true;
-      wall.castShadow = true;
-      scene.add(wall);
-    }
+  const positions = [];
+  const normals = [];
+  const indices = [];
+  for (let i = 0; i <= N; i++) {
+    const s = trackSamples[i % N];
+    const m = Math.max(WALL_MARGIN_MIN, s.halfWidth * 0.4);
+    const px = s.x + s.nx * (s.halfWidth + m) * sign;
+    const pz = s.z + s.nz * (s.halfWidth + m) * sign;
+    positions.push(px, 0, pz, px, WALL_HEIGHT, pz);
+    // normal de la pared apunta hacia el pasillo (adentro)
+    normals.push(-s.nx * sign, 0, -s.nz * sign, -s.nx * sign, 0, -s.nz * sign);
   }
-  sideWall(1);
-  sideWall(-1);
+  for (let i = 0; i < N; i++) {
+    const a = i * 2, b = i * 2 + 1, c = i * 2 + 2, d = i * 2 + 3;
+    indices.push(a, c, b, b, c, d);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  geo.setIndex(indices);
+  const mat = new THREE.MeshStandardMaterial({ color: 0xF4F1EA, roughness: 0.92, side: THREE.DoubleSide });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.receiveShadow = true;
+  mesh.castShadow = true;
+  return mesh;
+}
+function buildTrackWalls() {
+  scene.add(buildWallRibbon(1));
+  scene.add(buildWallRibbon(-1));
+
+  // Zócalo (base oscura) para dar detalle arquitectónico a la pared
+  const baseMat = new THREE.MeshStandardMaterial({ color: 0xB98A55, roughness: 0.8 });
+  [1, -1].forEach(sign => {
+    const N = trackSamples.length;
+    const positions = [];
+    const indices = [];
+    for (let i = 0; i <= N; i++) {
+      const s = trackSamples[i % N];
+      const m = Math.max(WALL_MARGIN_MIN, s.halfWidth * 0.4);
+      const px = s.x + s.nx * (s.halfWidth + m) * sign;
+      const pz = s.z + s.nz * (s.halfWidth + m) * sign;
+      positions.push(px, 0, pz, px, 1.1, pz);
+    }
+    for (let i = 0; i < N; i++) {
+      const a = i * 2, b = i * 2 + 1, c = i * 2 + 2, d = i * 2 + 3;
+      indices.push(a, c, b, b, c, d);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geo.setIndex(indices);
+    geo.computeVertexNormals();
+    const mesh = new THREE.Mesh(geo, baseMat);
+    mesh.material.side = THREE.DoubleSide;
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+  });
 }
 buildTrackWalls();
 
 // Ventana con luz cálida (hora dorada), ubicada sobre el muro real del baño
 (function placeWindow() {
   const s = trackSamples[Math.round((8 / WAYPOINTS.length) * SAMPLES) % trackSamples.length];
-  const margin = Math.max(3, s.halfWidth * 0.4) + 0.3;
+  const margin = Math.max(WALL_MARGIN_MIN, s.halfWidth * 0.4) + 0.3;
   const wx = s.x - s.nx * (s.halfWidth + margin);
   const wz = s.z - s.nz * (s.halfWidth + margin);
   const windowGlow = new THREE.Mesh(
-    new THREE.PlaneGeometry(6, 4),
+    new THREE.PlaneGeometry(6 * PROP_SCALE * 0.5, 4 * PROP_SCALE * 0.5),
     new THREE.MeshBasicMaterial({ color: 0xfff3c4, transparent: true, opacity: 0.9, side: THREE.DoubleSide })
   );
-  windowGlow.position.set(wx, 4.5, wz);
+  windowGlow.position.set(wx, WALL_HEIGHT * 0.4, wz);
   windowGlow.rotation.y = Math.atan2(-s.nx, -s.nz);
   scene.add(windowGlow);
 })();
@@ -235,17 +273,17 @@ buildTrackWalls();
     const sIdx = Math.round((nextIdx / N) * SAMPLES) % trackSamples.length;
     const s = trackSamples[sIdx];
     [1, -1].forEach(side => {
-      const post = new THREE.Mesh(new THREE.BoxGeometry(0.5, 6.5, 0.5), doorMat);
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.5 * PROP_SCALE, 6.5 * PROP_SCALE, 0.5 * PROP_SCALE), doorMat);
       post.position.set(
-        s.x + s.nx * (s.halfWidth + 0.6) * side,
-        3.25,
-        s.z + s.nz * (s.halfWidth + 0.6) * side
+        s.x + s.nx * (s.halfWidth + 0.6 * PROP_SCALE) * side,
+        3.25 * PROP_SCALE,
+        s.z + s.nz * (s.halfWidth + 0.6 * PROP_SCALE) * side
       );
       post.castShadow = true;
       scene.add(post);
     });
-    const lintel = new THREE.Mesh(new THREE.BoxGeometry(s.halfWidth * 2 + 1.6, 0.5, 0.5), doorMat);
-    lintel.position.set(s.x, 6.2, s.z);
+    const lintel = new THREE.Mesh(new THREE.BoxGeometry(s.halfWidth * 2 + 1.6 * PROP_SCALE, 0.5 * PROP_SCALE, 0.5 * PROP_SCALE), doorMat);
+    lintel.position.set(s.x, 6.2 * PROP_SCALE, s.z);
     lintel.rotation.y = Math.atan2(s.nx, s.nz) + Math.PI / 2;
     lintel.castShadow = true;
     scene.add(lintel);
@@ -282,60 +320,114 @@ function trackSide(t, side, clearance) {
   };
 }
 
-// --- Isla de cocina (obstáculo sólido con la tostadora encima) ---
-const islandPos = trackSide(0.05, 1, 3.2);
+// --- Isla de cocina / mesa (obstáculo sólido, punto de despegue de la rampa) ---
+const islandPos = trackSide(0.05, 1, 3.2 * PROP_SCALE);
 const island = addProp(
-  new THREE.BoxGeometry(9, 1.1, 5),
+  new THREE.BoxGeometry(9 * PROP_SCALE, 1.1 * PROP_SCALE, 5 * PROP_SCALE),
   new THREE.MeshStandardMaterial({ color: 0x6b4a2c, roughness: 0.7 }),
-  islandPos.x, 0.55, islandPos.z, islandPos.ry
+  islandPos.x, 0.55 * PROP_SCALE, islandPos.z, islandPos.ry
 );
-const ISLAND = { x: islandPos.x, z: islandPos.z, rx: 5.2, rz: 3.0 };
+
+// --- Heladera (punto de aterrizaje del salto épico) ---
+const fridgePos = trackSide(0.10, 1, 4 * PROP_SCALE);
+addProp(
+  new THREE.BoxGeometry(3.2 * PROP_SCALE, 6.4 * PROP_SCALE, 3 * PROP_SCALE),
+  new THREE.MeshStandardMaterial({ color: 0xE7E2D6, roughness: 0.35, metalness: 0.15 }),
+  fridgePos.x, 3.2 * PROP_SCALE, fridgePos.z, fridgePos.ry
+);
+
+// --- Obstáculos con los que te podés chocar (reducen velocidad al impactar) ---
+const OBSTACLES = [
+  { x: islandPos.x, z: islandPos.z, rx: 5.2 * PROP_SCALE, rz: 3.0 * PROP_SCALE, jumpable: true },
+];
+
+function addCrashObstacle(t, side, clearanceFrac, rx, rz, geo, mat) {
+  const p = trackCurve.getPointAt(t);
+  const tan = trackCurve.getTangentAt(t).normalize();
+  const nx = -tan.z, nz = tan.x;
+  const idx = Math.round(t * trackSamples.length) % trackSamples.length;
+  const halfWidth = trackSamples[idx].halfWidth;
+  // clearanceFrac 0 = centro del camino, 1 = pegado al borde: así el obstáculo
+  // realmente invade parte del camino y hay que esquivarlo.
+  const dist = halfWidth * clearanceFrac * side;
+  const pos = { x: p.x + nx * dist, z: p.z + nz * dist, ry: Math.atan2(tan.x, tan.z) };
+  addProp(geo, mat, pos.x, rx > rz ? rz : rz, pos.z, pos.ry);
+  OBSTACLES.push({ x: pos.x, z: pos.z, rx, rz });
+  return pos;
+}
+
+// Canasto de ropa en el Pasillo B (parcialmente en el camino)
+addCrashObstacle(
+  0.55, 1, 0.35, 2.4 * PROP_SCALE, 2.4 * PROP_SCALE,
+  new THREE.CylinderGeometry(2.4 * PROP_SCALE, 2.0 * PROP_SCALE, 2.6 * PROP_SCALE, 16),
+  new THREE.MeshStandardMaterial({ color: 0xEADFC8, roughness: 0.95 })
+);
+
+// Torre de bloques en el Living (parcialmente en el camino)
+addCrashObstacle(
+  0.43, -1, 0.3, 2.6 * PROP_SCALE, 2.6 * PROP_SCALE,
+  new THREE.BoxGeometry(2.6 * PROP_SCALE, 3.4 * PROP_SCALE, 2.6 * PROP_SCALE),
+  new THREE.MeshStandardMaterial({ color: 0x2980B9, roughness: 0.5 })
+);
+
+// --- Rampa de salto épico: de la mesa a la heladera (atajo) ---
+const RAMP_T = 0.02;
+const rampPos = trackSide(RAMP_T, 1, 1 * PROP_SCALE);
+const ramp = addProp(
+  new THREE.BoxGeometry(3.4 * PROP_SCALE, 0.5 * PROP_SCALE, 5 * PROP_SCALE),
+  new THREE.MeshStandardMaterial({ color: 0xC9A24B, roughness: 0.6 }),
+  rampPos.x, 1.3 * PROP_SCALE, rampPos.z, rampPos.ry
+);
+ramp.rotation.x = -0.42;
+const RAMP = { x: rampPos.x, z: rampPos.z, radius: 3.5 * PROP_SCALE, tRange: [0.008, 0.032] };
 
 // --- Living: sillón + mesa ratona ---
-const couchPos = trackSide(0.40, -1, 2.5);
+const couchPos = trackSide(0.40, -1, 2.5 * PROP_SCALE);
 addProp(
-  new THREE.BoxGeometry(6, 1.6, 3),
+  new THREE.BoxGeometry(6 * PROP_SCALE, 1.6 * PROP_SCALE, 3 * PROP_SCALE),
   new THREE.MeshStandardMaterial({ color: 0xC96B4A, roughness: 0.85 }),
-  couchPos.x, 0.8, couchPos.z, couchPos.ry
+  couchPos.x, 0.8 * PROP_SCALE, couchPos.z, couchPos.ry
 );
-const tablePos = trackSide(0.47, 1, 3);
+const tablePos = trackSide(0.47, 1, 3 * PROP_SCALE);
 addProp(
-  new THREE.CylinderGeometry(1.4, 1.4, 0.4, 24),
+  new THREE.CylinderGeometry(1.4 * PROP_SCALE, 1.4 * PROP_SCALE, 0.4 * PROP_SCALE, 24),
   new THREE.MeshStandardMaterial({ color: 0x2b2b2b, roughness: 0.6 }),
-  tablePos.x, 0.22, tablePos.z
+  tablePos.x, 0.22 * PROP_SCALE, tablePos.z
 );
 
 // --- Baño: bañera ---
-const tubPos = trackSide(0.61, 1, 2.8);
+const tubPos = trackSide(0.61, 1, 2.8 * PROP_SCALE);
 addProp(
-  new THREE.BoxGeometry(6, 1.6, 3.2),
+  new THREE.BoxGeometry(6 * PROP_SCALE, 1.6 * PROP_SCALE, 3.2 * PROP_SCALE),
   new THREE.MeshStandardMaterial({ color: 0xFFFFFF, roughness: 0.3, metalness: 0.05 }),
-  tubPos.x, 0.8, tubPos.z, tubPos.ry
+  tubPos.x, 0.8 * PROP_SCALE, tubPos.z, tubPos.ry
 );
 
 // --- Dormitorio: cama ---
-const bedPos = trackSide(0.83, -1, 4.5);
+const bedPos = trackSide(0.83, -1, 4.5 * PROP_SCALE);
 addProp(
-  new THREE.BoxGeometry(6, 1.4, 8),
+  new THREE.BoxGeometry(6 * PROP_SCALE, 1.4 * PROP_SCALE, 8 * PROP_SCALE),
   new THREE.MeshStandardMaterial({ color: 0x8B5E34, roughness: 0.8 }),
-  bedPos.x, 0.7, bedPos.z, bedPos.ry
+  bedPos.x, 0.7 * PROP_SCALE, bedPos.z, bedPos.ry
 );
 addProp(
-  new THREE.BoxGeometry(5.4, 0.8, 7),
+  new THREE.BoxGeometry(5.4 * PROP_SCALE, 0.8 * PROP_SCALE, 7 * PROP_SCALE),
   new THREE.MeshStandardMaterial({ color: 0xF4F1EA, roughness: 0.9 }),
-  bedPos.x, 1.5, bedPos.z, bedPos.ry
+  bedPos.x, 1.5 * PROP_SCALE, bedPos.z, bedPos.ry
 );
 
 // --- Bloques tipo Lego dispersos en el pasillo/entrada ---
 (function addLegoScatter() {
   const legoColors = [0xC0392B, 0xF1C40F, 0x2980B9, 0x27AE60, 0xE67E22];
-  for (let i = 0; i < 30; i++) {
+  for (let i = 0; i < 40; i++) {
     const t = Math.random();
     const p = trackCurve.getPointAt(t);
     const tan = trackCurve.getTangentAt(t);
     const nx = -tan.z, nz = tan.x;
-    const side = (Math.random() < 0.5 ? -1 : 1) * (3.5 + Math.random() * 3);
-    const size = 0.4 + Math.random() * 0.35;
+    const idx = Math.round(t * trackSamples.length) % trackSamples.length;
+    const halfWidth = trackSamples[idx].halfWidth;
+    const side = (Math.random() < 0.5 ? -1 : 1) * (halfWidth + PROP_SCALE * (1.5 + Math.random() * 2.5));
+    const size = (0.4 + Math.random() * 0.35) * PROP_SCALE;
     addProp(
       new THREE.BoxGeometry(size, size, size),
       new THREE.MeshStandardMaterial({ color: legoColors[i % legoColors.length], roughness: 0.4 }),
@@ -347,7 +439,7 @@ addProp(
 // ============================================================
 // TOSTADORA — evento dinámico (calor + dispara pan)
 // ============================================================
-const toaster = { active: false, timer: 0, x: ISLAND.x, z: ISLAND.z, radius: 6.5 };
+const toaster = { active: false, timer: 0, x: OBSTACLES[0].x, z: OBSTACLES[0].z, radius: 6.5 * PROP_SCALE };
 const toasterGroup = new THREE.Group();
 const toasterBody = new THREE.Mesh(
   new THREE.BoxGeometry(1.6, 1.1, 1.1),
@@ -359,7 +451,8 @@ const toasterGlowMat = new THREE.MeshBasicMaterial({ color: 0xE4572E, transparen
 toasterGroup.add(new THREE.Mesh(new THREE.SphereGeometry(2.4, 16, 16), toasterGlowMat));
 const toasterLight = new THREE.PointLight(0xE4572E, 0, 10);
 toasterGroup.add(toasterLight);
-toasterGroup.position.set(toaster.x, 1.1 + 0.55, toaster.z);
+toasterGroup.position.set(toaster.x, (1.1 + 0.55) * PROP_SCALE, toaster.z);
+toasterGroup.scale.setScalar(PROP_SCALE);
 scene.add(toasterGroup);
 
 const toastSlices = [];
@@ -497,14 +590,17 @@ const car = {
   x: trackSamples[0].x, z: trackSamples[0].z,
   heading: startHeading,
   speed: 0,
-  maxSpeed: 17,
-  boostMaxSpeed: 25,
-  accel: 0.44,
-  turnRate: 2.1,
+  maxSpeed: 10,
+  boostMaxSpeed: 15,
+  accel: 0.24,
+  turnRate: 2.0,
   friction: 0.985,
   boost: 100,
   boostMax: 100,
   isBoosting: false,
+  y: 0,
+  vy: 0,
+  jumping: false,
 };
 
 function forwardVec(heading) { return { x: Math.sin(heading), z: Math.cos(heading) }; }
@@ -575,38 +671,59 @@ function updateCar(dt) {
   let nx = car.x + f.x * car.speed * dt * heatFactor;
   let nz = car.z + f.z * car.speed * dt * heatFactor;
 
-  // Colisión con la isla de la cocina
-  const idx = nx - ISLAND.x, idz = nz - ISLAND.z;
-  const islandVal = (idx / ISLAND.rx) * (idx / ISLAND.rx) + (idz / ISLAND.rz) * (idz / ISLAND.rz);
-  if (islandVal < 1) {
-    const ang = Math.atan2(idz, idx);
-    nx = ISLAND.x + Math.cos(ang) * ISLAND.rx * 1.03;
-    nz = ISLAND.z + Math.sin(ang) * ISLAND.rz * 1.03;
-    car.speed *= 0.5;
-  } else if (islandVal < 1.2 && Math.abs(car.speed) > 6) {
-    car.boost = Math.min(car.boostMax, car.boost + dt * 26); // near-miss
+  // --- Rampa de salto épico (atajo mesa -> heladera) ---
+  const progressT = nearestIdx / trackSamples.length;
+  const inRampZone = progressT >= RAMP.tRange[0] && progressT <= RAMP.tRange[1];
+  if (!car.jumping && inRampZone && car.speed > car.maxSpeed * 0.55) {
+    car.jumping = true;
+    car.vy = 15.5;
+  }
+  if (car.jumping) {
+    car.vy -= 27 * dt;
+    car.y += car.vy * dt;
+    if (car.y <= 0) { car.y = 0; car.vy = 0; car.jumping = false; }
   }
 
-  // Colisión con los bordes de la pista (paredes/muebles del ambiente)
+  // Colisión con obstáculos (mesa, canasto, torre de bloques) — se puede
+  // saltar por arriba con la rampa mientras se está en el aire.
+  if (!car.jumping) {
+    for (const obs of OBSTACLES) {
+      const odx = nx - obs.x, odz = nz - obs.z;
+      const oVal = (odx / obs.rx) * (odx / obs.rx) + (odz / obs.rz) * (odz / obs.rz);
+      if (oVal < 1) {
+        const ang = Math.atan2(odz, odx);
+        nx = obs.x + Math.cos(ang) * obs.rx * 1.03;
+        nz = obs.z + Math.sin(ang) * obs.rz * 1.03;
+        car.speed *= 0.5;
+        break;
+      } else if (oVal < 1.2 && Math.abs(car.speed) > 6) {
+        car.boost = Math.min(car.boostMax, car.boost + dt * 26); // near-miss
+      }
+    }
+  }
+
+  // Colisión con los bordes de la pista (no aplica mientras se está saltando)
   const si = findNearestSample(nx, nz);
   const s = trackSamples[si];
-  const lateral = (nx - s.x) * s.nx + (nz - s.z) * s.nz;
-  const limit = s.halfWidth * 0.97;
-  if (lateral > limit) {
-    const push = lateral - limit;
-    nx -= push * s.nx; nz -= push * s.nz;
-    car.speed *= 0.6;
-  } else if (lateral < -limit) {
-    const push = lateral + limit;
-    nx -= push * s.nx; nz -= push * s.nz;
-    car.speed *= 0.6;
-  } else if (Math.abs(lateral) > s.halfWidth * 0.85 && Math.abs(car.speed) > 6) {
-    car.boost = Math.min(car.boostMax, car.boost + dt * 22); // roce cercano al borde
+  if (!car.jumping) {
+    const lateral = (nx - s.x) * s.nx + (nz - s.z) * s.nz;
+    const limit = s.halfWidth * 0.97;
+    if (lateral > limit) {
+      const push = lateral - limit;
+      nx -= push * s.nx; nz -= push * s.nz;
+      car.speed *= 0.6;
+    } else if (lateral < -limit) {
+      const push = lateral + limit;
+      nx -= push * s.nx; nz -= push * s.nz;
+      car.speed *= 0.6;
+    } else if (Math.abs(lateral) > s.halfWidth * 0.85 && Math.abs(car.speed) > 6) {
+      car.boost = Math.min(car.boostMax, car.boost + dt * 22); // roce cercano al borde
+    }
   }
 
   car.x = nx; car.z = nz;
 
-  kart.position.set(car.x, 0, car.z);
+  kart.position.set(car.x, car.y, car.z);
   kart.rotation.y = car.heading;
   const wheelSpin = car.speed * dt * 2.4;
   wheels.forEach(w => (w.rotation.x += wheelSpin));
@@ -643,9 +760,9 @@ const desiredCamPos = new THREE.Vector3();
 function updateCamera() {
   const f = forwardVec(car.heading);
   const camDist = 5.2, camHeight = 2.3;
-  desiredCamPos.set(car.x - f.x * camDist, camHeight, car.z - f.z * camDist);
+  desiredCamPos.set(car.x - f.x * camDist, camHeight + car.y * 0.7, car.z - f.z * camDist);
   camera.position.lerp(desiredCamPos, 0.16);
-  camTarget.set(car.x + f.x * 8, 0.9, car.z + f.z * 8);
+  camTarget.set(car.x + f.x * 8, 0.9 + car.y * 0.7, car.z + f.z * 8);
   camera.lookAt(camTarget);
 }
 
@@ -703,6 +820,9 @@ function resetGame() {
   car.heading = startHeading;
   car.speed = 0;
   car.boost = car.boostMax;
+  car.y = 0;
+  car.vy = 0;
+  car.jumping = false;
   state.time = 0;
   state.lap = 0;
   state.prevProgress = 0;
@@ -712,6 +832,12 @@ function resetGame() {
   toaster.timer = 0;
   kart.position.set(car.x, 0, car.z);
   kart.rotation.y = car.heading;
+
+  // Posicionar la cámara instantáneamente (sin lerp) para evitar un barrido
+  // lento al arrancar o reiniciar, ahora que la casa es mucho más grande.
+  const f0 = forwardVec(car.heading);
+  camera.position.set(car.x - f0.x * 5.2, 2.3, car.z - f0.z * 5.2);
+  camera.lookAt(car.x + f0.x * 8, 0.9, car.z + f0.z * 8);
 }
 
 function startRace() {
